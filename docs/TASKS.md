@@ -26,13 +26,16 @@ Commit `e6f836a` no fork.
 
 ## 2. `nd` base
 
-- [ ] Dependência `nodriver` por path
-- [ ] CLI (clap): `start`, `stop`, `daemon`, `open`, `tabs`, `tab`, `eval`, `text`
-- [ ] Daemon HTTP em `127.0.0.1` + `.token`
-- [ ] Desktop oculto: porte do `edge_isolado.py` (CreateDesktopW, foco emulado, perfil ocupado, `--oculto`)
-- [ ] Espera pós-navegação: rede ociosa + DOM parado
-- [ ] `fechar.ps1` encerra o daemon
-- [ ] Conferência de detecção nos sites que passam com o nodriver Python
+- [x] Dependência `nodriver` por path
+- [x] CLI (clap): `start`, `stop`, `status`, `daemon`, `open`, `tabs`, `tab`, `eval`, `text`
+- [x] Daemon HTTP em `127.0.0.1` com token; estado em `~/.nd/daemon.json` (`ND_DIR` muda o diretório)
+- [x] Desktop oculto opcional (`--oculto`): porte do `edge_isolado.py` (CreateDesktopW, foco emulado, perfil ocupado)
+- [x] Espera pós-navegação: rede ociosa (500 ms sem requisição) + DOM parado (300 ms), teto de 10 s
+- [x] Abas novas abertas pela página são acompanhadas (Target.setDiscoverTargets); daemon religa domínios depois de reconexão
+- [x] Daemon encerra sozinho quando o Edge morre
+- [x] `fechar.ps1` encerra o daemon (`nd stop`, depois taskkill)
+- [x] Conferência de detecção nos sites que passam com o nodriver Python
+- [x] Testes de ponta a ponta (`cargo test`: 3 de integração + 3 de unidade)
 
 ## 3. Map + ações
 

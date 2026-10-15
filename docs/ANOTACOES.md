@@ -96,3 +96,36 @@
   `Disconnected`.
 - `Browser::close` desliga a reconexão antes de fechar.
 - Testes: 13 (browser) + 3 (reconexão) + 1 (screenshot), estáveis em 3 rodadas paralelas.
+
+## 2026-10-15 — fase 2 (`nd` base)
+
+### Achados
+
+- `--remote-debugging-port=0` faz o Edge 155 reportar `navigator.webdriver === true`. Com porta
+  fixa fica `false`. A lib passou a escolher uma porta livre antes de lançar (como o
+  `util.free_port` do nodriver) e a esperar o `/json/version` (commit `f2f87ea` no fork). Com porta
+  fixa o Edge não grava `DevToolsActivePort`.
+- O Windows faz o processo filho herdar todo handle herdável. O daemon herdava o pipe do terminal
+  (`nd start | sed`, o Bash do Claude Code) e quem lia a saída ficava preso até o daemon morrer.
+  O `nd start` marca stdin/stdout/stderr como não herdáveis antes de criar o daemon.
+- O daemon é criado com `CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW` e, quando o job permite,
+  `CREATE_BREAKAWAY_FROM_JOB`; sobrevive entre chamadas do Bash do Claude Code.
+- Latência de um comando simples (`nd eval 1`, build release): ~60–70 ms.
+
+### Conferência de detecção (perfil temporário, desktop oculto)
+
+| Site | `nd` | nodriver Python |
+|---|---|---|
+| bot.sannysoft.com | 58 linhas, 0 falhas/avisos | 0 falhas/avisos |
+| browserscan.net/bot-detection | Test Results: Normal (CDP Normal, webdriver false) | Test Results: Normal |
+| nowsecure.nl (Cloudflare) | conteúdo da página ("NOWSECURE BY NODRIVER") | conteúdo da página |
+| `navigator.webdriver` | false | False |
+
+### LinkedIn com `~/nodriver/profile-edge`
+
+- `nd` (oculto, pt-BR) em `/feed/`: redireciona para `/checkpoint/challenge/...` ("Let's do a quick
+  security check", com "Sign in / Join now").
+- Logo depois, `li_check_login.py` (nodriver Python, oculto, mesmo perfil): mesmo checkpoint
+  ("Vamos fazer uma verificação rápida de segurança").
+- A verificação precisa de ação humana no Edge visível. Não se sabe se a visita do `nd` a disparou
+  ou se já estava pendente.

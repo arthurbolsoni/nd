@@ -1,0 +1,11 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Lento</title></head>
+<body>
+<h1>Página lenta</h1>
+<div id="dados">carregando</div>
+<script>
+  fetch('/api/lenta').then(r => r.json()).then(j => {
+    setTimeout(() => { document.getElementById('dados').textContent = 'dados: ' + j.valor; }, 200);
+  });
+</script>
+</body></html>
