@@ -4,28 +4,68 @@ Automação de navegador para o Claude Code: Edge controlado por CDP, com um dae
 conexão aberta, um cliente de linha de comando curto, snapshot com refs, captura de rede, receitas
 para armadilhas comuns, atlas por site e replay de fluxos.
 
-## Arquitetura
+## Repositórios
+
+| Repo | Visibilidade | Pasta | Conteúdo |
+|---|---|---|---|
+| `arthurbolsoni/nodriver-rs` | público, fork de `ultrafunkamsterdam/nodriver` (AGPL-3.0) | `~/desktop/nodriver-rs` | biblioteca Rust: porte do nodriver |
+| `arthurbolsoni/nd` | privado | `~/desktop/nd` | ferramenta `nd`: daemon, cliente, map, rede, atlas, replay, skill |
+
+O `nd` depende da biblioteca por `path = "../nodriver-rs/crates/nodriver"` durante o
+desenvolvimento e por `git = "https://github.com/arthurbolsoni/nodriver-rs"` depois.
+
+## Biblioteca `nodriver-rs`
+
+Porte do que o nodriver Python 0.50.x entrega, sem as partes que o `nd` não usa.
+
+Layout no fork: workspace Cargo na raiz, Python original mantido no lugar como referência até o
+porte cobrir o que o `nd` usa.
+
+```
+Cargo.toml                 workspace
+crates/nodriver-cdp/       tipos CDP gerados do browser_protocol.json / js_protocol.json
+crates/nodriver/           Browser, Tab, Element, Config, Connection
+nodriver/                  Python original (referência)
+```
+
+Módulos e equivalência com o Python:
+
+| Rust | Python | Faz |
+|---|---|---|
+| `config` | `core/config.py` | flags de lançamento, perfil, idioma, headless, porta |
+| `browser` | `core/browser.py` | lança Chrome/Edge, lê a porta de debug, lista e atualiza targets, `get(url, new_tab)`, `close()` |
+| `connection` | `core/connection.py` | websocket CDP, ids de comando, respostas, assinatura de eventos por domínio |
+| `tab` | `core/tab.py` | `evaluate`, `select(css)` com espera, `find(texto, best_match)`, espera de carregamento, `activate` |
+| `element` | `core/element.py` | `mouse_click` no centro da caixa, `send_keys`, `clear_input`, `send_file`, `scroll_into_view` |
+| `nodriver-cdp` | `generate_cdp.py` + `cdp/` | geração de tipos e comandos a partir do protocolo (build script ou gerador versionado) |
+
+Regras:
+
+- Sem chromedriver e sem flags de automação; lista de flags igual à do `config.py`.
+- Domínios CDP ativados só quando um comando precisa (sem `Runtime.enable` automático).
+- tokio + tokio-tungstenite + serde/serde_json.
+- Testes com `cargo test` contra páginas locais.
+
+## Ferramenta `nd`
 
 Um executável, `nd.exe`, em dois papéis:
 
-- `nd daemon` — mantém o Edge e a conexão CDP, captura a rede de todas as abas e atende HTTP em
-  `127.0.0.1` com token em `~/nodriver/nd/.token`.
+- `nd daemon` — mantém o Edge e a conexão (via `nodriver-rs`), captura a rede de todas as abas e
+  atende HTTP em `127.0.0.1` com token em `.token`.
 - `nd <comando>` — cliente; manda o comando ao daemon e imprime a resposta.
+- `nd start` dispara `nd daemon` em segundo plano; `nd stop` encerra daemon e Edge.
 
-Componentes:
+Partes do `nd`:
 
-- Cliente CDP próprio (tokio + tokio-tungstenite + serde_json). Sem chromiumoxide: só os domínios
-  que o comando precisa são ativados.
-- Lançamento do Edge com os flags do nodriver 0.50.3 (sem chromedriver, sem flags de automação),
-  perfil `~/nodriver/profile-edge`.
 - Desktop oculto (`CreateDesktopW` + `CreateProcessW`, crate `windows`), porte do
-  `edge_isolado.py`. Padrão; `nd start --visivel` abre no desktop do usuário para login, captcha
-  ou 2FA.
+  `~/.claude/skills/nodriver-isolado/files/edge_isolado.py`, com emulação de foco e checagem de
+  perfil ocupado. Padrão; `nd start --visivel` abre no desktop do usuário para login, captcha ou
+  2FA.
 - JS injetado em arquivos `.js` (`include_str!`): snapshot, receitas, diff pós-ação.
 - Atlas em YAML (serde).
-- `fechar.ps1` passa a encerrar o daemon.
+- `~/nodriver/fechar.ps1` passa a encerrar o daemon.
 
-## Comandos
+### Comandos
 
 | Comando | Faz |
 |---|---|
@@ -49,7 +89,7 @@ Componentes:
 Ação que muda a página devolve um diff: URL nova, elementos que apareceram ou sumiram, toast ou
 erro visível.
 
-## Snapshot (`nd map`)
+### Snapshot (`nd map`)
 
 - Elementos interativos visíveis: button, a, input, select, textarea, `[role=…]`,
   `[contenteditable]`, elementos com `onclick` ou `cursor:pointer`.
@@ -59,8 +99,6 @@ erro visível.
 - Shadow DOM aberto; iframe do mesmo domínio por JS, de outro domínio pelo target CDP do frame.
 - Padrão: viewport e entorno. `--tudo`: página inteira. Corte em ~300 linhas com indicação do
   restante.
-
-Formato:
 
 ```
 # Candidatura — jobs.site.com/apply/123
@@ -76,7 +114,7 @@ Refs: atributo `data-nd="eN"` no elemento e localizador de reserva no daemon (ro
 curto). Ref perdida por re-render é resolvida pelo localizador; falha nos dois devolve
 "ref velha, rode nd map".
 
-## Rede
+### Rede
 
 - Domínio `Network` em todas as abas; buffer das últimas 500 requisições XHR/fetch/documento.
 - Guarda método, URL, status, tipo, corpo enviado, corpo da resposta JSON até 200 KB.
@@ -85,7 +123,7 @@ curto). Ref perdida por re-render é resolvida pelo localizador; falha nos dois 
   ficam os do site.
 - Fora da lista: imagem, fonte, analytics (lista de domínios e tipos).
 
-## Receitas
+### Receitas
 
 Levantadas dos scripts do `~/nodriver` (`iframe_file`, `blobcap`, `formsave`, `fetchsave`,
 `clickcapture`, `printpdf`, `viaunica`, `live.py`, `*_apply.py`):
@@ -99,9 +137,9 @@ Levantadas dos scripts do `~/nodriver` (`iframe_file`, `blobcap`, `formsave`, `f
 - Espera pós-ação: rede ociosa + DOM parado por 300 ms, teto de 10 s.
 - Download de blob e PDF.
 
-## Atlas
+### Atlas
 
-`~/nodriver/sites/<dominio>.yaml`:
+`<dir do atlas>/<dominio>.yaml`:
 
 ```yaml
 site: jobs.ashbyhq.com
@@ -129,13 +167,13 @@ fluxos:
 - Passos por nome e role, não por ref.
 - Sem cookie, token, senha ou dado pessoal além do que o fluxo usa; o resto vira `{param}`.
 
-## Replay
+### Replay
 
 `nd run <site> <fluxo> -p k=v`: executa os passos sem LLM. Falha num passo para ali e imprime
 número do passo, erro, `nd map` e `nd net` recente. Passo com `confirmar: true` não roda no
 replay; `--ate N` limita até o passo N.
 
-## Skill e regra
+### Skill e regra
 
 - Skill `navegar` (`~/.claude/skills/navegar/SKILL.md`):
   1. `nd atlas <site>`; com fluxo, `nd run`.
@@ -151,24 +189,25 @@ replay; `--ate N` limita até o passo N.
 - Páginas em `tests/fixtures/` servidas localmente: form React controlado, combobox com
   autocomplete, iframe de outro domínio (outra porta) com upload, shadow DOM, SPA com fetch, botão
   que troca o nó no re-render, `alert`.
-- `cargo test` cobre cada comando, ref após re-render, diff pós-ação, rede, `nd api` e replay com
-  falha no passo certo.
+- Biblioteca: `cargo test` de lançamento, conexão, evaluate, select/find, clique, digitação,
+  upload, abas.
+- `nd`: cada comando, ref após re-render, diff pós-ação, rede, `nd api`, replay com falha no passo
+  certo.
+- Detecção: abrir pelo `nd` os sites que hoje passam com o nodriver Python (LinkedIn, um com
+  Cloudflare) e comparar.
 - Aceitação: site real sem skill; tarefa do zero com `nd`, atlas gravado, repetição com `nd run`;
   comparação do número de chamadas de ferramenta com o método atual.
 
-## Ordem
+## Fases
 
-1. Cliente CDP, lançamento do Edge, desktop oculto, daemon + cliente, `open`/`tabs`/`eval`/`text`,
-   `fechar.ps1`. Conferência de detecção nos sites que hoje passam com nodriver.
-2. `map` + refs, `click`/`fill`/`pick`/`check`/`upload`/`key`/`wait`, diff pós-ação.
-3. Rede: `net`, `api`.
-4. Receitas restantes: diálogos, download, PDF.
-5. Atlas + `run`.
-6. Skill `navegar` + linha no CLAUDE.md.
-7. Aceitação em site real.
+Detalhe em [TASKS.md](TASKS.md).
 
-## Em aberto
-
-- Desktop oculto como padrão.
-- Local do atlas: `~/nodriver/sites/` ou dentro de `~/.claude` (sincronizado).
-- Site do teste de aceitação.
+1. Biblioteca: conexão, lançamento, tipos CDP, Tab/Element.
+2. `nd` base: daemon + cliente, desktop oculto, `open`/`tabs`/`eval`/`text`, `fechar.ps1`,
+   conferência de detecção.
+3. `map` + refs + ações + diff.
+4. Rede: `net`, `api`.
+5. Receitas restantes.
+6. Atlas + `run`.
+7. Skill `navegar` + regra no CLAUDE.md.
+8. Aceitação.
