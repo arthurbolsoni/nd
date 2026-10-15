@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Rolagem</title>
+<style>
+  body { margin: 0; font: 16px sans-serif; }
+  h1 { margin: 8px; }
+  #painel { height: 200px; overflow-y: auto; border: 1px solid #888; margin: 8px; }
+  #painel button { display: block; height: 40px; width: 100%; }
+  /* 10 anúncios ocupam 0,9 tela: a primeira rolagem já mostra o sentinela. */
+  .anuncio { display: block; height: 9vh; border-bottom: 1px solid #ccc; box-sizing: border-box; }
+</style>
+</head>
+<body>
+  <h1>Anúncios</h1>
+  <!-- Lista com rolagem própria: carrega mais 10 opções ao chegar no fim dela (até 30). -->
+  <div id="painel"></div>
+  <!-- Rolagem infinita da página: cada página vem de /api/lista quando o sentinela aparece (até 4). -->
+  <div id="lista"></div>
+  <div id="sentinela">carregando…</div>
+  <script>
+    const painel = document.getElementById('painel');
+    function maisOpcoes() {
+      const n = painel.children.length;
+      if (n >= 30) return;
+      for (let i = 1; i <= 10; i++) {
+        const b = document.createElement('button');
+        b.textContent = 'Opção ' + (n + i);
+        painel.appendChild(b);
+      }
+    }
+    maisOpcoes();
+    painel.addEventListener('scroll', () => {
+      if (painel.scrollTop + painel.clientHeight >= painel.scrollHeight - 5) setTimeout(maisOpcoes, 100);
+    });
+
+    const lista = document.getElementById('lista');
+    const sentinela = document.getElementById('sentinela');
+    let pagina = 0;
+    let carregando = false;
+    async function maisAnuncios() {
+      if (carregando) return;
+      if (pagina >= 4) {
+        sentinela.textContent = 'fim da lista';
+        return;
+      }
+      carregando = true;
+      pagina++;
+      await fetch('/api/lista?pagina=' + pagina).then((r) => r.json());
+      for (let i = 1; i <= 10; i++) {
+        const a = document.createElement('a');
+        const n = lista.children.length + 1;
+        a.className = 'anuncio';
+        a.href = '/item/' + n;
+        a.textContent = 'Anúncio ' + n;
+        lista.appendChild(a);
+      }
+      carregando = false;
+    }
+    maisAnuncios();
+    new IntersectionObserver((es) => {
+      if (es.some((e) => e.isIntersecting)) maisAnuncios();
+    }).observe(sentinela);
+  </script>
+</body>
+</html>

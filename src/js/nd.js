@@ -773,6 +773,58 @@
     }
   }
 
+  // `el` ou o ancestral mais próximo (atravessando shadow DOM) com rolagem vertical própria; null
+  // quando só a página rola.
+  function rolavel(el) {
+    for (let x = el; x && x.nodeType === 1; x = x.parentElement || x.getRootNode().host) {
+      const d = x.ownerDocument;
+      if (x === d.documentElement || x === d.body) return null;
+      if (/(auto|scroll|overlay)/.test(estilo(x).overflowY) && x.scrollHeight > x.clientHeight + 1) return x;
+    }
+    return null;
+  }
+
+  // Ponto do viewport onde o gesto rola a página direto: fora de listas com rolagem própria e de
+  // iframes.
+  function pontoPagina() {
+    const pts = [[0.5, 0.5], [0.5, 0.25], [0.5, 0.75], [0.25, 0.5], [0.75, 0.5], [0.1, 0.5], [0.9, 0.5], [0.5, 0.1]];
+    for (const [fx, fy] of pts) {
+      const x = innerWidth * fx;
+      const y = innerHeight * fy;
+      const hit = document.elementFromPoint(x, y);
+      if (!hit || (hit.localName !== 'iframe' && !rolavel(hit))) return { x, y };
+    }
+    return { x: innerWidth / 2, y: innerHeight / 2 };
+  }
+
+  // Área que `nd scroll` rola: a página, ou com `ref` o elemento (ou o ancestral) com rolagem
+  // própria. Devolve o ponto do gesto (centro da parte visível), a posição e a altura total.
+  function rolagem(a) {
+    ajustarProx(a);
+    if (!a.ref) {
+      const e = document.scrollingElement || document.documentElement;
+      return { ...pontoPagina(), top: e.scrollTop, cliente: innerHeight, total: e.scrollHeight, prox };
+    }
+    const el = rolavel(exigir(a.ref));
+    if (!el) return { semRolagem: true, prox };
+    const w = janela(el);
+    let b = el.getBoundingClientRect();
+    if (b.bottom <= 0 || b.top >= w.innerHeight) {
+      el.scrollIntoView({ block: 'center', behavior: 'instant' });
+      b = el.getBoundingClientRect();
+    }
+    const top = Math.max(b.top, 0);
+    const bottom = Math.min(b.bottom, w.innerHeight);
+    const left = Math.max(b.left, 0);
+    const right = Math.min(b.right, w.innerWidth);
+    const off = deslocamento(el);
+    return {
+      r: refPara(el), l: descrCurta(el),
+      x: (left + right) / 2 + off.x, y: (top + bottom) / 2 + off.y,
+      top: el.scrollTop, cliente: el.clientHeight, total: el.scrollHeight, prox,
+    };
+  }
+
   // Espera o DOM ficar `ms` sem mudança de estrutura ou texto, até `max` ms.
   function quieto(a) {
     return new Promise((resolve) => {
@@ -800,6 +852,6 @@
     achar: (a) => !!achar(a.ref),
     doc: () => meuDoc,
     mapa, localizar, ponto, caixaQuadro, tipo, preparar, definir, estado, escolher, opcoes,
-    clicarJs, focar, temTexto, api, temSel, porTexto, quieto,
+    clicarJs, focar, temTexto, api, temSel, porTexto, quieto, rolagem,
   };
 })()

@@ -19,6 +19,7 @@ nd pick <alvo> <opção>              select, combobox, autocomplete, menu
 nd check <alvo> [--nao]             checkbox, radio, switch
 nd upload <alvo> <arquivo>...       input de arquivo ou botão que abre o seletor
 nd key <tecla>... [--em ALVO]       Enter, Tab, Escape, Control+a, Shift+Tab...
+nd scroll [--subir] [--vezes N] [--fim] [--dentro ALVO]   rola (gesto de rolagem) e mostra o que carregou
 nd wait text|sel|url|net <valor> [--sumir] [--max S]
 nd net [filtro] [--novas] [--antigas] [--todas] [--ultimas N]
 nd net --corpo N [--caminho a.b[].c] [--max N] [--saida ARQ]
@@ -42,6 +43,10 @@ nd stop
   placeholder). Texto que bate com mais de um elemento dá erro com a lista de refs.
 - Ações imprimem o que mudou: `+` elemento novo, `-` sumiu, `~` mudou, `texto novo:`, avisos,
   diálogos aceitos, ou `página nova` com o mapa. `--sem-diff` não lê a página depois.
+- `nd scroll` rola ~0,9 tela por vez com o gesto de rolagem do navegador (como a roda do mouse),
+  espera a página assentar a cada vez e mostra a rede e os itens novos. `--fim` segue até a página
+  parar de crescer (limite de 30 rolagens; `--vezes` muda). `--dentro` rola a área com rolagem
+  própria (lista, painel) que contém o elemento.
 - `wait net` considera as requisições concluídas desde a última ação.
 - `nd net`: chamadas XHR/fetch/documento da página atual, uma por linha, com a forma do JSON da
   resposta e o nome da operação GraphQL:

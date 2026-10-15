@@ -84,7 +84,7 @@ Commit `e6f836a` no fork.
 
 ## 7. Skill e regra
 
-- [x] `~/.claude/skills/navegar/SKILL.md`
+- [x] `~/.claude/skills/browser/SKILL.md`
 - [x] Linha na seção nodriver do `~/.claude/CLAUDE.md`
 - [x] `nd` no PATH (`cargo install --path .` → `~/.cargo/bin/nd.exe`)
 
@@ -93,3 +93,34 @@ Commit `e6f836a` no fork.
 - [x] Tarefa do zero com `nd` no Facebook (Marketplace, 20 anúncios de bicicleta até R$ 800)
 - [x] Atlas gravado (`~/nodriver/sites/www.facebook.com.yaml`), repetição com `nd run` (geladeira)
 - [x] Contagem de chamadas de ferramenta: método atual × `nd` (ANOTACOES, fase 8)
+
+## 9. Rolagem e port completo
+
+Commit `051992e` no fork.
+
+- [x] Revisão da API pública do Python (`tab.py`, `element.py`, `browser.py`, `config.py`,
+  `connection.py`, `util.py`) contra o crate; tabela Python → Rust no README do crate, com o que
+  ficou fora e o motivo
+- [x] Domínio `DOMStorage` no gerador de tipos CDP
+- [x] `Tab`: `scroll_down`/`scroll_up`/`scroll_gesture` (`Input.synthesizeScrollGesture`),
+  `scroll_bottom_reached`, `back`/`forward`, `content`, `reload_with`, `screenshot` (PNG/JPEG,
+  página inteira), `save_screenshot`, `get_window`, `set_window_bounds`, `set_window_state`,
+  `maximize`/`minimize`/`fullscreen`/`normal`, `mouse_drag`, `mouse_click_with`,
+  `local_storage`/`set_local_storage`, `xpath`, `frame_tree`, `frame_resource_tree`/`urls`,
+  `set_download_path`, `download_file`, `linked_sources`, `get_all_urls`,
+  `bypass_insecure_connection_warning`, `inspector_url`
+- [x] `Element`: `mouse_drag_to`/`by`/`to_element`, `mouse_click_with`, `scroll_down`/`scroll_up`
+  da área própria, `text_all`, `attributes`, `set_attribute`/`remove_attribute`, `parent`,
+  `children`, `remove`, `call_method`, `set_value`, `set_text`, `document_rect`, `screenshot`,
+  `save_screenshot`
+- [x] `Browser`: `cookies()` (`get_all`, `set_all`, `clear`, `save`/`load` em JSON com filtro),
+  `grant_all_permissions`, `create_context` com proxy opcional
+- [x] Correções vistas nos testes: `navigate` para fragmento espera a entrada do histórico;
+  `type_text` manda `key` nos eventos `char`
+- [x] Testes da biblioteca: `scroll.rs`, `page.rs`, `element.rs`, `storage.rs`, screenshot de
+  página inteira e de elemento (41 de integração no total)
+- [x] `nd scroll [--subir] [--vezes N] [--fim] [--dentro ALVO] [--sem-diff]` pelo `agir()` (rede,
+  abas novas, diff) e no histórico
+- [x] Passo `scroll` no atlas: `scroll: 3`, `scroll: fim`, `{vezes, fim, dentro, subir}`
+- [x] Testes: `tests/rolagem.rs` (página `rolagem.html`: rolagem infinita com
+  `/api/lista?pagina=N`, lista com rolagem própria, `--fim`, limite, subida, rascunho e replay)

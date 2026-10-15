@@ -26,6 +26,8 @@ use crate::estado::{self, Estado};
 
 /// Tempo máximo de um comando no daemon.
 const LIMITE_COMANDO: Duration = Duration::from_secs(180);
+/// `nd scroll --fim` espera a página assentar a cada rolagem (até 5 s cada).
+const LIMITE_SCROLL: Duration = Duration::from_secs(540);
 
 #[derive(Debug, Clone)]
 pub struct Opcoes {
@@ -179,7 +181,12 @@ async fn tratar(
         return (StatusCode::UNAUTHORIZED, Json(r));
     }
     let _vez = d.fila.lock().await;
-    let r = match tokio::time::timeout(LIMITE_COMANDO, comandos::executar(&d, &p)).await {
+    let limite = if p.cmd == "scroll" {
+        LIMITE_SCROLL
+    } else {
+        LIMITE_COMANDO
+    };
+    let r = match tokio::time::timeout(limite, comandos::executar(&d, &p)).await {
         Ok(Ok(saida)) => Resposta {
             ok: true,
             saida,
@@ -193,7 +200,7 @@ async fn tratar(
         Err(_) => Resposta {
             ok: false,
             saida: String::new(),
-            erro: format!("{} passou de {} s", p.cmd, LIMITE_COMANDO.as_secs()),
+            erro: format!("{} passou de {} s", p.cmd, limite.as_secs()),
         },
     };
     (StatusCode::OK, Json(r))

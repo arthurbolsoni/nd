@@ -16,7 +16,8 @@ desenvolvimento e por `git = "https://github.com/arthurbolsoni/nodriver-rs"` dep
 
 ## Biblioteca `nodriver-rs`
 
-Porte do que o nodriver Python 0.50.x entrega, sem as partes que o `nd` não usa.
+Porte da API pública do nodriver Python 0.50.x. O que ficou fora (inspetor externo, realce visual,
+gravação de vídeo, OpenCV, proxy com credenciais, ...) está no README do crate, com o motivo.
 
 Layout no fork: workspace Cargo na raiz, Python original mantido no lugar como referência até o
 porte cobrir o que o `nd` usa.
@@ -33,10 +34,10 @@ Módulos e equivalência com o Python:
 | Rust | Python | Faz |
 |---|---|---|
 | `config` | `core/config.py` | flags de lançamento, perfil, idioma, headless, porta |
-| `browser` | `core/browser.py` | lança Chrome/Edge, lê a porta de debug, lista e atualiza targets, `get(url, new_tab)`, `close()` |
+| `browser` | `core/browser.py` | lança Chrome/Edge, lê a porta de debug, lista e atualiza targets, `get(url, new_tab)`, `close()`, cookies, permissões, contexto com proxy |
 | `connection` | `core/connection.py` | websocket CDP, ids de comando, respostas, assinatura de eventos por domínio |
-| `tab` | `core/tab.py` | `evaluate`, `select(css)` com espera, `find(texto, best_match)`, espera de carregamento, `activate` |
-| `element` | `core/element.py` | `mouse_click` no centro da caixa, `send_keys`, `clear_input`, `send_file`, `scroll_into_view` |
+| `tab` | `core/tab.py` | `evaluate`, `select(css)` com espera, `find(texto, best_match)`, espera de carregamento, `activate`, rolagem por gesto, histórico, janela, screenshot de página inteira, `localStorage`, `xpath`, arrastar |
+| `element` | `core/element.py` | `mouse_click` no centro da caixa, `send_keys`, `clear_input`, `send_file`, `scroll_into_view`, arrastar, atributos, pai/filhos, screenshot do elemento |
 | `nodriver-cdp` | `generate_cdp.py` + `cdp/` | geração de tipos e comandos a partir do protocolo (build script ou gerador versionado) |
 
 Regras:
@@ -78,6 +79,7 @@ Partes do `nd`:
 | `nd fill <ref> "valor"` | preenche campo, com tratamento de input controlado (React) |
 | `nd pick <ref> "opção"` | select nativo, combobox, autocomplete |
 | `nd check <ref>` / `nd upload <ref> <arq>` / `nd key <tecla>` | checkbox, upload, teclas |
+| `nd scroll [--vezes N] [--fim] [--dentro <alvo>] [--subir]` | rola com o gesto de rolagem do navegador; mostra rede e itens novos; `--fim` até parar de crescer |
 | `nd wait text\|sel\|url\|net <x>` | espera explícita |
 | `nd eval '<js>'` / `nd eval -f arq.js` | JS livre |
 | `nd net [filtro] [--corpo n]` | XHR/fetch capturados |
@@ -174,8 +176,9 @@ fluxos:
 ```
 
 - Passos por nome (o texto que o `nd` aceita como alvo), não por ref; `nome` vale como `alvo`.
-- Ações: `open`, `click`, `fill`, `pick`, `check`, `upload`, `key`, `wait`/`esperar`, `download`,
+- Ações: `open`, `click`, `fill`, `pick`, `check`, `upload`, `key`, `scroll`, `wait`/`esperar`, `download`,
   `eval`, `text`, `tab`, `pdf`, com os mesmos campos das opções da linha de comando.
+- `scroll: 3` (vezes), `scroll: fim` ou mapa `{vezes, fim, dentro, subir}`; `vezes` aceita `"{param}"`.
 - `opcional: true`: falha não para o fluxo. `confirmar: true`: o replay para antes do passo.
 - `open` com caminho (`/x`) vai para `https://<site>/x`.
 - `login: true` no fluxo: depois do primeiro `open`, `login.checar` precisa dar `true`.
@@ -193,7 +196,7 @@ usuário. `--ate N` limita até o passo N; `--seco` mostra os passos com os par�
 
 ### Skill e regra
 
-- Skill `navegar` (`~/.claude/skills/navegar/SKILL.md`):
+- Skill `browser` (`~/.claude/skills/browser/SKILL.md`):
   1. `nd atlas <site>`; com fluxo, `nd run`.
   2. Sem atlas: só leitura → `nd text`; interação → `nd open`, `nd map`, `nd net`.
   3. Dado na rede → `nd api`.
@@ -227,5 +230,6 @@ Detalhe em [TASKS.md](TASKS.md).
 4. Rede: `net`, `api`.
 5. Receitas restantes.
 6. Atlas + `run`.
-7. Skill `navegar` + regra no CLAUDE.md.
+7. Skill `browser` + regra no CLAUDE.md.
 8. Aceitação.
+9. Rolagem (`nd scroll`, passo `scroll`) e porte completo da biblioteca.

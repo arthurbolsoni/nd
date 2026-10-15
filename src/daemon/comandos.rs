@@ -106,6 +106,15 @@ async fn executar_cmd(d: &Arc<Daemon>, p: &Pedido) -> R {
             let x: KeyArgs = args(p)?;
             acoes::agir(d, x.base, Acao::Key { teclas: x.teclas }).await
         }
+        "scroll" => {
+            let x: ScrollArgs = args(p)?;
+            let acao = Acao::Scroll {
+                subir: x.subir,
+                vezes: x.vezes,
+                fim: x.fim,
+            };
+            acoes::agir(d, x.base, acao).await
+        }
         "wait" => acoes::wait(d, args(p)?).await,
         "download" => {
             let x: DownloadAcaoArgs = args(p)?;
@@ -233,6 +242,18 @@ struct UploadArgs {
     #[serde(flatten)]
     base: AcaoArgs,
     arquivos: Vec<String>,
+}
+
+/// `alvo` (em `base`) é a área com rolagem própria (`--dentro`); sem ele, a página.
+#[derive(Deserialize)]
+struct ScrollArgs {
+    #[serde(flatten)]
+    base: AcaoArgs,
+    #[serde(default)]
+    subir: bool,
+    vezes: Option<u32>,
+    #[serde(default)]
+    fim: bool,
 }
 
 #[derive(Deserialize)]

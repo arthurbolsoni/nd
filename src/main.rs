@@ -155,6 +155,23 @@ enum Cmd {
         #[command(flatten)]
         acao: OpAcao,
     },
+    /// Rola a página (gesto de rolagem, como a roda do mouse) e mostra o que carregou.
+    Scroll {
+        /// Rola para cima.
+        #[arg(long)]
+        subir: bool,
+        /// Quantas rolagens de ~1 tela (padrão 1; com --fim, o limite, padrão 30).
+        #[arg(long)]
+        vezes: Option<u32>,
+        /// Rola até a página (ou a área) parar de crescer.
+        #[arg(long)]
+        fim: bool,
+        /// Rola a área com rolagem própria que contém este elemento (ref ou texto).
+        #[arg(long)]
+        dentro: Option<String>,
+        #[command(flatten)]
+        acao: OpAcao,
+    },
     /// Espera texto, seletor, URL ou requisição (desde a última ação).
     Wait {
         #[arg(value_parser = ["text", "sel", "url", "net"])]
@@ -291,6 +308,8 @@ enum Cmd {
 
 /// Tempo máximo de espera do cliente por comandos que navegam ou agem.
 const LONGO: Duration = Duration::from_secs(200);
+/// `nd scroll --fim` espera a página assentar a cada rolagem.
+const ESPERA_SCROLL: Duration = Duration::from_secs(600);
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
@@ -351,6 +370,17 @@ fn main() -> ExitCode {
             ),
             Err(e) => Err(e.to_string()),
         },
+        Cmd::Scroll {
+            subir,
+            vezes,
+            fim,
+            dentro,
+            acao,
+        } => comando(
+            "scroll",
+            json!({ "alvo": dentro, "subir": subir, "vezes": vezes, "fim": fim, "sem_diff": acao.sem_diff }),
+            ESPERA_SCROLL,
+        ),
         Cmd::Key { teclas, em, acao } => comando(
             "key",
             json!({ "alvo": em, "teclas": teclas, "sem_diff": acao.sem_diff }),

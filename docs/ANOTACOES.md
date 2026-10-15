@@ -358,3 +358,67 @@ logada pelo usuário antes do teste.
   do Facebook e polui `nd net graphql`.
 - Falta um comando de rolagem (`mouseWheel` por CDP): `window.scrollTo` e a tecla End (com o foco
   na busca) não dispararam a paginação infinita.
+
+## 2026-10-15 — fase 9 (rolagem e port completo)
+
+### Biblioteca
+
+- API pública do Python revista arquivo por arquivo contra o crate; a tabela Python → Rust e a
+  lista do que ficou fora, com o motivo, estão no README do crate (commit `051992e` no fork).
+- Ficaram fora: inspetor aberto no navegador do sistema (`inspector_url` entrou), realce visual
+  (`flash`, `highlight_overlay`, `flash_point`), `record_video`, `verify_cf`/`template_location`
+  (OpenCV), `js_dumps`/`get_js_attributes`, `tile_windows`, `HTTPApi`, `ProxyForwarder` (proxy com
+  credenciais), `get_frames`/`IFrame` (iframes fora de processo desligados pelas flags padrão), as
+  funções de árvore DOM local do `util.py` e o gerenciamento de processo do Python.
+- `DOMStorage` entrou no gerador de tipos (para `local_storage`).
+- Diferenças em relação ao Python: `back`/`forward` por `Page.navigateToHistoryEntry` esperando a
+  página; `scroll_bottom_reached` pelo elemento de rolagem (`scrollTop + clientHeight` contra
+  `scrollHeight`); cookies em JSON com filtro por closure (o `save` do Python ignora o padrão e
+  grava todos); `xpath` com expressão inválida dá erro; `set_value` usa o setter nativo e dispara
+  `input`/`change`.
+
+### Decisões do `nd scroll`
+
+- A rolagem é `Input.synthesizeScrollGesture` pela biblioteca (`Tab::scroll_gesture`), não
+  `scrollTo`. Na página de teste, 2 rolagens geraram 15 eventos `wheel` com `isTrusted` e nenhum
+  sintético: o gesto entra pelo caminho de entrada do navegador, como a roda do mouse.
+- Cada rolagem anda 0,9 da altura visível (sobra um pedaço da tela anterior). O Python usa
+  porcentagem da altura da janela, que inclui a barra do navegador.
+- Ponto do gesto na página: centro do viewport, ou o primeiro ponto de uma lista de candidatos
+  que não cai num iframe nem numa área com rolagem própria (o gesto rola primeiro o que está
+  embaixo do ponto). O Python usa `(0, 0)`.
+- `--dentro ALVO`: o elemento ou o ancestral mais próximo com `overflow-y` `auto`/`scroll` e
+  conteúdo maior que a caixa; dá para passar um item da lista. O ponto é o centro da parte
+  visível da área, levado ao viewport da aba pelos iframes de outro domínio.
+- Depois de cada gesto, a espera de sempre (rede ociosa + DOM parado), até 5 s.
+- `--fim` para quando a posição chega ao limite e a altura não cresceu com o último gesto; antes
+  de parar, espera mais 1 s e mede de novo (lista que pede a próxima página com atraso). Limite de
+  30 rolagens, `--vezes` muda. Sem chegar ao fim, a saída diz que parou no limite.
+- `scroll` passa pelo `agir()`: rede desde o início, abas novas, downloads e diff. No histórico:
+  `scroll: N`, `scroll: fim` ou mapa `{vezes, fim, dentro, subir}`.
+- Tempo máximo do comando no daemon: 540 s para `scroll` (180 s para os outros).
+
+### Achados
+
+- Dentro de uma área com rolagem própria perto do topo da página, os itens que passam para cima
+  dela ficam com a caixa acima do início do documento, e o mapa os trata como ocultos (a mesma
+  regra que esconde menu fora da tela). No diff aparecem em `- sumiram`; os que passaram pela
+  área sem ficar visíveis no fim aparecem em `texto novo:`.
+- `Browser.grantPermissions` concede a lista do comando e nega todo o resto: concedendo um tipo
+  por vez, só o último ficava. A biblioteca testa cada tipo e concede os aceitos juntos. O Edge
+  recusa `smartCard` e `webPrinting`.
+- `navigate` para um fragmento da mesma página voltava antes de a entrada do histórico existir;
+  um `back` logo depois voltava duas páginas. Agora espera `Page.navigatedWithinDocument`.
+- Eventos `char` sem `key` chegam à página como `keypress` com `event.key` vazio; `type_text`
+  passou a mandar `key`.
+- Teste de arrastar: um arrasto que deixa texto selecionado faz o próximo clique no mesmo ponto
+  arrastar a seleção (`dragstart` nativo, `pointercancel`, sem `mouseup`). A página de teste chama
+  `preventDefault` no `mousedown`.
+- No headless, `synthesizeScrollGesture`, `Browser.setWindowBounds` e os estados
+  maximizado/normal funcionam.
+- `Page.getResourceTree` lista os recursos carregados, não o documento do quadro.
+
+### Não conferido nesta fase
+
+- `nd scroll` no Facebook Marketplace; o atlas `www.facebook.com.yaml` e a armadilha sobre
+  rolagem ficaram como estavam.

@@ -294,8 +294,21 @@ async fn ponto(d: &Arc<Daemon>, tab: &Tab, alvo: &Alvo) -> Result<Ponto, String>
             c["l"].as_str().unwrap_or("")
         )));
     }
-    let (mut x, mut y) = (v["x"].as_f64().unwrap_or(0.0), v["y"].as_f64().unwrap_or(0.0));
-    let mut q = alvo.q.clone();
+    let (x, y) = (v["x"].as_f64().unwrap_or(0.0), v["y"].as_f64().unwrap_or(0.0));
+    let (x, y) = no_viewport(d, aba, &alvo.q, x, y).await?;
+    Ok(Ponto::Em(x, y))
+}
+
+/// Ponto `(x, y)` do viewport do quadro `q` levado ao viewport da aba, somando a origem de cada
+/// iframe de outro domínio até o quadro principal.
+async fn no_viewport(
+    d: &Arc<Daemon>,
+    aba: &str,
+    q: &Quadro,
+    mut x: f64,
+    mut y: f64,
+) -> Result<(f64, f64), String> {
+    let mut q = q.clone();
     while let Some((pai, r_iframe)) = d.paginas.pai(aba, &q) {
         let o = js(
             d,
@@ -308,7 +321,7 @@ async fn ponto(d: &Arc<Daemon>, tab: &Tab, alvo: &Alvo) -> Result<Ponto, String>
         y += o["y"].as_f64().unwrap_or(0.0);
         q = pai;
     }
-    Ok(Ponto::Em(x, y))
+    Ok((x, y))
 }
 
 /// Clique de mouse (CDP) no elemento; sem caixa visível, `el.click()`.
@@ -575,7 +588,134 @@ async fn teclas(
     Ok(notas)
 }
 
+/// Limite de rolagens de `nd scroll --fim` sem `--vezes`.
+pub const ROLAGENS_FIM: u32 = 30;
+/// Espera pela página depois de cada rolagem.
+const ESPERA_ROLAGEM: Duration = Duration::from_secs(5);
+/// Fração da altura visível rolada por vez (sobra um pedaço da tela anterior).
+const PASSO_ROLAGEM: f64 = 0.9;
+
+/// Posição de rolagem lida pelo `rolagem` do nd.js.
+struct Medida {
+    x: f64,
+    y: f64,
+    top: f64,
+    cliente: f64,
+    total: f64,
+}
+
+impl Medida {
+    fn de(v: &Value) -> Self {
+        let n = |k: &str| v[k].as_f64().unwrap_or(0.0);
+        Medida {
+            x: n("x"),
+            y: n("y"),
+            top: n("top"),
+            cliente: n("cliente"),
+            total: n("total"),
+        }
+    }
+
+    fn no_limite(&self, subir: bool) -> bool {
+        if subir {
+            self.top <= 1.0
+        } else {
+            (self.top + self.cliente).ceil() >= self.total - 1.0
+        }
+    }
+}
+
+/// Rola a página (ou a área com rolagem própria do alvo) com gestos sintetizados pela
+/// biblioteca, esperando a página assentar depois de cada um. Com `fim`, segue até a posição
+/// chegar ao limite e a altura parar de crescer, até `vezes` (padrão [`ROLAGENS_FIM`]).
+async fn rolar(
+    d: &Arc<Daemon>,
+    tab: &Tab,
+    alvo: Option<&Alvo>,
+    subir: bool,
+    vezes: Option<u32>,
+    fim: bool,
+) -> Result<Vec<String>, String> {
+    let aba = tab.target_id();
+    let q = match alvo {
+        Some(al) => al.q.clone(),
+        None => pagina::principal(d, tab).await?,
+    };
+    let mut args = alvo.map_or(json!({}), |al| json!({ "ref": al.r }));
+    let v = js_ref(d, aba, &q, "rolagem", args.clone()).await?;
+    let mut notas = Vec::new();
+    if let Some(al) = alvo {
+        if v["semRolagem"] == json!(true) {
+            return Err(format!(
+                "{} não tem rolagem própria nem está numa área com rolagem; sem --dentro rola a página",
+                al.r
+            ));
+        }
+        let r = v["r"].as_str().unwrap_or("");
+        if r != al.r {
+            notas.push(format!("área com rolagem: {r} {}", v["l"].as_str().unwrap_or("")));
+        }
+        args = json!({ "ref": r });
+    }
+    let medir = || async {
+        js_ref(d, aba, &q, "rolagem", args.clone())
+            .await
+            .map(|v| Medida::de(&v))
+    };
+    let limite = vezes.unwrap_or(if fim { ROLAGENS_FIM } else { 1 }).max(1);
+    let sentido = if subir { -1.0 } else { 1.0 };
+    let mut m = Medida::de(&v);
+    let inicio = m.top;
+    let mut n = 0;
+    let mut chegou = false;
+    while n < limite {
+        let (x, y) = no_viewport(d, aba, &q, m.x, m.y).await?;
+        let dist = (m.cliente * PASSO_ROLAGEM).max(50.0) * sentido;
+        tab.scroll_gesture(x, y, 0.0, dist).await.map_err(e)?;
+        n += 1;
+        estabilizar(d, tab, Instant::now(), ESPERA_ROLAGEM).await;
+        let mut depois = medir().await?;
+        if depois.no_limite(subir) && (subir || depois.total <= m.total) {
+            // Lista que carrega mais pode demorar um instante para pedir a próxima página.
+            if !subir {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                estabilizar(d, tab, Instant::now(), ESPERA_ROLAGEM).await;
+                depois = medir().await?;
+            }
+            if depois.no_limite(subir) && (subir || depois.total <= m.total) {
+                chegou = true;
+                m = depois;
+                break;
+            }
+        }
+        m = depois;
+    }
+    let onde = if alvo.is_some() { "a área" } else { "a página" };
+    let direcao = if subir { "para cima" } else { "para baixo" };
+    notas.push(format!(
+        "{n} rolagem(ns) {direcao}: posição {:.0} → {:.0} de {:.0} px",
+        inicio, m.top, m.total
+    ));
+    if chegou {
+        notas.push(if subir {
+            format!("{onde} está no topo")
+        } else {
+            format!("fim: {onde} parou de crescer")
+        });
+    } else if fim {
+        notas.push(format!(
+            "parou no limite de {limite} rolagens; {onde} ainda crescia (--vezes N aumenta o limite)"
+        ));
+    }
+    Ok(notas)
+}
+
 pub enum Acao {
+    Scroll {
+        subir: bool,
+        vezes: Option<u32>,
+        fim: bool,
+    },
     Click {
         js: bool,
     },
@@ -621,6 +761,7 @@ impl Acao {
             Acao::Upload { .. } => "arquivo(s) em",
             Acao::Key { .. } => "teclas em",
             Acao::Download { .. } => "download por",
+            Acao::Scroll { .. } => "rolagem dentro de",
         }
     }
 }
@@ -657,6 +798,7 @@ pub async fn agir(d: &Arc<Daemon>, a: AcaoArgs, acao: Acao) -> R {
     let t0 = Instant::now();
     let notas = match (&acao, &alvo) {
         (Acao::Key { teclas: t }, al) => teclas(d, &tab, al.as_ref(), t).await,
+        (Acao::Scroll { subir, vezes, fim }, al) => rolar(d, &tab, al.as_ref(), *subir, *vezes, *fim).await,
         (_, None) => Err("informe o alvo (ref ou texto)".into()),
         (Acao::Click { js }, Some(al)) => clicar(d, &tab, al, *js).await,
         (Acao::Fill { valor, teclas }, Some(al)) => preencher(d, &tab, al, valor, *teclas).await,
@@ -731,6 +873,30 @@ fn passo(acao: &Acao, dado: Option<&str>, alvo: Option<&Alvo>) -> Option<Value> 
         m
     };
     Some(match acao {
+        Acao::Scroll { subir, vezes, fim } => {
+            if nome.is_empty() && !*subir {
+                match (fim, vezes) {
+                    (false, None) => return Some(json!({ "scroll": 1 })),
+                    (false, Some(n)) => return Some(json!({ "scroll": n })),
+                    (true, None) => return Some(json!({ "scroll": "fim" })),
+                    (true, Some(_)) => {}
+                }
+            }
+            let mut x = json!({});
+            if let Some(n) = vezes {
+                x["vezes"] = json!(n);
+            }
+            if *fim {
+                x["fim"] = json!(true);
+            }
+            if *subir {
+                x["subir"] = json!(true);
+            }
+            if !nome.is_empty() {
+                x["dentro"] = json!(nome);
+            }
+            json!({ "scroll": x })
+        }
         Acao::Click { js: false } => json!({ "click": nome }),
         Acao::Click { js: true } => json!({ "click": com(json!({ "js": true })) }),
         Acao::Fill { valor, teclas } => {
@@ -865,5 +1031,34 @@ mod testes {
         assert!(!eh_ref("enviar"));
         assert_eq!(chave("  São   Paulo "), "sao paulo");
         assert_eq!(so_alfanum("123.456-78"), "12345678");
+    }
+
+    #[test]
+    fn passo_de_scroll() {
+        let s = |subir, vezes, fim, alvo: Option<&str>| {
+            let al = alvo.map(|n| Alvo {
+                r: "e5".into(),
+                q: Quadro {
+                    alvo: String::new(),
+                    frame: String::new(),
+                },
+                l: String::new(),
+                nota: None,
+                nm: n.into(),
+            });
+            passo(
+                &Acao::Scroll { subir, vezes, fim },
+                alvo.map(|_| "e5"),
+                al.as_ref(),
+            )
+            .unwrap()
+        };
+        assert_eq!(s(false, None, false, None), json!({ "scroll": 1 }));
+        assert_eq!(s(false, Some(3), false, None), json!({ "scroll": 3 }));
+        assert_eq!(s(false, None, true, None), json!({ "scroll": "fim" }));
+        assert_eq!(
+            s(true, Some(2), false, Some("Resultados")),
+            json!({ "scroll": { "vezes": 2, "subir": true, "dentro": "Resultados" } })
+        );
     }
 }

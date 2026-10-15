@@ -12,9 +12,10 @@ use crate::estado::{self, Estado};
 
 /// Ações aceitas num passo (`esperar` é sinônimo de `wait`).
 const ACOES: &[&str] = &[
-    "open", "click", "fill", "pick", "check", "upload", "key", "wait", "esperar", "download", "eval", "text",
-    "tab", "pdf",
+    "open", "click", "fill", "pick", "check", "upload", "key", "scroll", "wait", "esperar", "download",
+    "eval", "text", "tab", "pdf",
 ];
+const ESPERA_SCROLL: Duration = Duration::from_secs(600);
 /// Linhas da saída de cada passo no replay (sem `--tudo`).
 const LINHAS_PASSO: usize = 8;
 const LONGO: Duration = Duration::from_secs(200);
@@ -421,6 +422,43 @@ fn pedido(p: &Passo, site: &str) -> Result<(String, Value, Duration), String> {
                 LONGO,
             )
         }
+        "scroll" => {
+            // `scroll: 3`, `scroll: fim` ou `{vezes, fim, dentro, subir}`.
+            let vezes_de = |x: &Value| -> Result<Option<u64>, String> {
+                match x {
+                    Value::Null => Ok(None),
+                    Value::Number(n) => n
+                        .as_u64()
+                        .map(Some)
+                        .ok_or_else(|| format!("scroll: vezes inválido: {n}")),
+                    Value::String(s) => s
+                        .trim()
+                        .parse::<u64>()
+                        .map(Some)
+                        .map_err(|_| format!("scroll: vezes inválido: {s:?}")),
+                    outro => Err(format!("scroll: vezes inválido: {outro}")),
+                }
+            };
+            let (vezes, fim, dentro, subir) = match v {
+                Value::String(s) if s.trim() == "fim" => (None, true, Value::Null, false),
+                Value::Null => (None, false, Value::Null, false),
+                Value::Object(_) => (
+                    vezes_de(&campo(v, "vezes"))?,
+                    campo(v, "fim").as_bool().unwrap_or(false),
+                    match campo(v, "dentro") {
+                        Value::Null => alvo_de(v).unwrap_or(Value::Null),
+                        x => x,
+                    },
+                    campo(v, "subir").as_bool().unwrap_or(false),
+                ),
+                x => (vezes_de(x)?, false, Value::Null, false),
+            };
+            (
+                "scroll",
+                json!({ "alvo": dentro, "vezes": vezes, "fim": fim, "subir": subir, "sem_diff": sem_diff }),
+                ESPERA_SCROLL,
+            )
+        }
         "wait" => {
             let (tipo, valor) = [
                 ("text", "text"),
@@ -744,5 +782,31 @@ mod testes {
         );
         let (_, a, _) = pedido(&passo(&y("check: {nome: Termos, nao: true}"), 1).unwrap(), "x").unwrap();
         assert_eq!(a["desmarcar"], true);
+    }
+
+    #[test]
+    fn pedidos_de_scroll() {
+        let s = |t: &str| pedido(&passo(&y(t), 1).unwrap(), "x");
+        let (c, a, _) = s("scroll: 3").unwrap();
+        assert_eq!(
+            (c.as_str(), &a["vezes"], &a["fim"]),
+            ("scroll", &json!(3), &json!(false))
+        );
+        let (_, a, _) = s("scroll: fim").unwrap();
+        assert_eq!(
+            (&a["vezes"], &a["fim"], &a["alvo"]),
+            (&json!(null), &json!(true), &json!(null))
+        );
+        // Valor vindo de parâmetro chega como texto.
+        let (_, a, _) = s("scroll: '5'").unwrap();
+        assert_eq!(a["vezes"], 5);
+        let (_, a, _) = s("scroll: {vezes: 2, dentro: Resultados, subir: true}").unwrap();
+        assert_eq!(
+            (&a["vezes"], &a["alvo"], &a["subir"], &a["fim"]),
+            (&json!(2), &json!("Resultados"), &json!(true), &json!(false))
+        );
+        let (_, a, _) = s("scroll: {fim: true, vezes: 50}").unwrap();
+        assert_eq!((&a["vezes"], &a["fim"]), (&json!(50), &json!(true)));
+        assert!(s("scroll: muito").unwrap_err().contains("vezes"));
     }
 }
