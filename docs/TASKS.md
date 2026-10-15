@@ -11,15 +11,18 @@
 
 ## 1. Biblioteca `nodriver-rs`
 
-- [ ] Workspace Cargo na raiz do fork; crates `nodriver` e `nodriver-cdp`
-- [ ] Gerador de tipos CDP a partir de `browser_protocol.json` / `js_protocol.json` (equivalente ao `generate_cdp.py`), só os domínios usados: Browser, Target, Page, Runtime, DOM, Input, Network, Emulation, Fetch
-- [ ] `connection`: websocket, ids, respostas, eventos por domínio, timeout, reconexão
-- [ ] `config`: flags do `config.py`, perfil, idioma, porta, headless, executável (Chrome/Edge)
-- [ ] `browser`: lançar, ler porta de debug, conectar em navegador já aberto (host/porta), targets, `get`, `close`
-- [ ] `tab`: `evaluate` (await_promise, return_by_value), `select` com espera, `find` por texto, espera de carregamento, `activate`
-- [ ] `element`: caixa, `scroll_into_view`, `mouse_click`, `send_keys`, `clear_input`, `send_file`
-- [ ] Testes contra páginas locais
-- [ ] README do fork descrevendo o crate
+Commit `e6f836a` no fork.
+
+- [x] Workspace Cargo na raiz do fork; crates `nodriver`, `nodriver-cdp` e `cdp-gen`
+- [x] Gerador de tipos CDP a partir de `browser_protocol.json` / `js_protocol.json` (equivalente ao `generate_cdp.py`): Browser, Target, Page, Runtime, DOM, Input, Network, Emulation, Fetch, Storage, Security, Log, IO e os referenciados (Debugger)
+- [x] `connection`: websocket, ids, respostas, eventos tipados e crus por sessão, timeout
+- [ ] `connection`: reconexão
+- [x] `config`: flags do `config.py`, perfil, idioma, porta, headless, executável (Chrome, Edge como alternativa)
+- [x] `browser`: lançar, porta por `DevToolsActivePort`, conectar em navegador já aberto, targets, `get`, `close`, perfil em uso, pid do navegador
+- [x] `tab`: `evaluate` (await_promise, return_by_value), `select` com espera, `find` por texto (com shadow DOM), espera de carregamento, `activate`, teclas, mouse, screenshot
+- [x] `element`: caixa, `scroll_into_view`, `mouse_click`, `click`, `send_keys`, `clear_input`, `send_file`, `select_option`, `apply`
+- [x] Testes contra páginas locais (13 testes de integração, Edge headless, perfil temporário)
+- [x] README do fork descrevendo o crate
 
 ## 2. `nd` base
 

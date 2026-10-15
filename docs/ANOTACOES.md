@@ -56,3 +56,27 @@
 - Skim, execução especulativa (arXiv 2605.16565): https://arxiv.org/pdf/2605.16565
 - IETF draft AI Manifest: https://www.ietf.org/archive/id/draft-han-ai-manifest-02.html
 - Browserless, batching de ações: https://docs.browserless.io/mcp/browser-agent
+
+## 2026-10-15 — fase 1 (biblioteca)
+
+### Comportamentos do Edge encontrados
+
+- `msedge.exe` sempre se relança: o processo iniciado sai com código 0 e o navegador roda como
+  filho dele, mesmo com perfil novo. Saída com código 0 não indica perfil em uso.
+- Perfil em uso é detectado antes do lançamento: no Windows o `lockfile` do perfil não pode ser
+  apagado enquanto o navegador roda. No Linux/macOS, `SingletonLock` aponta para `<host>-<pid>`.
+- O pid real do navegador vem de `SystemInfo.getProcessInfo` (processo do tipo `browser`).
+- O endpoint HTTP do DevTools (`/json/version`) não fecha a conexão depois da resposta; o corpo é
+  lido pelo `Content-Length`, que vem sem espaço depois dos dois pontos.
+- Porta de debug 0: o navegador escolhe e grava em `DevToolsActivePort` (linha 1 porta, linha 2
+  caminho do websocket).
+
+### Decisões da biblioteca
+
+- Lib pública em inglês (código, comentários, erros); docs do `nd` em português.
+- Uma conexão websocket por navegador; abas por sessões `flatten`.
+- `Page.enable` só antes da primeira navegação da aba; `Runtime.enable` nunca.
+- `find` por texto em JS (`crates/nodriver/src/js/find.js`): nós de texto e atributos
+  `aria-label`, `placeholder`, `title`, `value`, `alt`, incluindo shadow DOM aberto.
+- Testes: `cargo test -p nodriver` (13 testes, ~20 s em paralelo). `NODRIVER_HEADFUL=1` mostra
+  as janelas.
