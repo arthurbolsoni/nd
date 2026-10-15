@@ -110,9 +110,10 @@ e12 button "Enviar candidatura"  [disabled]
 iframe#2 (outro domínio: forms.x.com) — 4 elementos → nd map --dentro iframe#2
 ```
 
-Refs: atributo `data-nd="eN"` no elemento e localizador de reserva no daemon (role + nome, CSS
-curto). Ref perdida por re-render é resolvida pelo localizador; falha nos dois devolve
-"ref velha, rode nd map".
+Refs: registro em memória no mundo isolado da página (ref → elemento) e localizador de reserva no
+daemon (papel + nome + posição entre iguais). Ref perdida por re-render é resolvida pelo
+localizador; falha nos dois devolve "ref velha, rode nd map". O plano inicial usava o atributo
+`data-nd`; a troca está nas anotações da fase 3.
 
 ### Rede
 

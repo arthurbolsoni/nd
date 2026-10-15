@@ -39,15 +39,20 @@ Commit `e6f836a` no fork.
 
 ## 3. Map + ações
 
-- [ ] `map.js`: interativos, nomes, estado, forms, títulos, shadow DOM, iframes, corte
-- [ ] Refs `data-nd` + localizador de reserva no daemon
-- [ ] `click`, `fill`, `pick`, `check`, `upload`, `key`, `wait`
-- [ ] Diff pós-ação
-- [ ] Iframe de outro domínio por target CDP
+- [x] `nd.js` (mundo isolado): interativos, nomes, estado, forms, diálogos, títulos, avisos,
+  shadow DOM, iframes do mesmo domínio, corte em 300 linhas com recorte na área visível
+- [x] Refs em registro na página (em vez de `data-nd`) + localizador de reserva no daemon
+- [x] `click`, `fill`, `pick`, `check`, `upload`, `key`, `wait`; alvo por ref ou texto
+- [x] Diff pós-ação (elementos, avisos, texto novo, página nova)
+- [x] Iframe de outro domínio por target CDP (ou mundo isolado no frame)
+- [x] `nd open` com mapa; espera por commit + DCL (3 s) + rede do site + DOM parado
+- [x] Teclas com modificador na biblioteca (`Control+a`, `Shift+Tab`)
+- [x] Testes: `tests/acoes.rs` (página `form.html`) e unitários de recorte, diff e rede
 
 ## 4. Rede
 
-- [ ] Network em todas as abas, buffer 500, corpos JSON até 200 KB
+- [ ] Network em todas as abas, buffer 500, corpos JSON até 200 KB (já há as 500 últimas
+  concluídas por aba, sem corpo, usadas pelo `nd wait net`)
 - [ ] Filtro de imagem/fonte/analytics
 - [ ] `nd net` com forma do JSON
 - [ ] `nd api` via `fetch` na página
@@ -55,7 +60,7 @@ Commit `e6f836a` no fork.
 ## 5. Receitas
 
 - [ ] Levantar dos scripts do `~/nodriver`: `iframe_file`, `blobcap`, `formsave`, `fetchsave`, `clickcapture`, `printpdf`, `viaunica`, `live.py`, `*_apply.py`
-- [ ] Diálogos automáticos
+- [x] Diálogos automáticos (aceitos pelo daemon, aparecem na saída; feito na fase 3)
 - [ ] `download` (blob), `pdf`
 
 ## 6. Atlas + replay

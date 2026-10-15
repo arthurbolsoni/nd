@@ -42,6 +42,13 @@ struct Abertura {
     headless: bool,
 }
 
+#[derive(Args, Clone)]
+struct OpAcao {
+    /// Não lê a página depois da ação (sem o diff).
+    #[arg(long)]
+    sem_diff: bool,
+}
+
 #[derive(Subcommand)]
 enum Cmd {
     /// Sobe o daemon e o Edge.
@@ -50,12 +57,15 @@ enum Cmd {
     Stop,
     /// Mostra o daemon, o perfil e a aba atual.
     Status,
-    /// Navega a aba atual (ou uma nova) e espera rede ociosa + DOM parado.
+    /// Navega a aba atual (ou uma nova), espera rede ociosa + DOM parado e mostra o mapa.
     Open {
         url: String,
         /// Abre numa aba nova, que passa a ser a atual.
         #[arg(long)]
         nova: bool,
+        /// Só título, URL e espera, sem o mapa.
+        #[arg(long)]
+        sem_map: bool,
     },
     /// Lista as abas; `*` marca a atual.
     Tabs,
@@ -76,10 +86,93 @@ enum Cmd {
         #[arg(long, default_value_t = 8000)]
         max: usize,
     },
+    /// Mapa da página: elementos interativos com refs (e12), grupos, títulos e avisos.
+    Map {
+        /// Página toda, sem recorte pela área visível nem pelo diálogo modal.
+        #[arg(long)]
+        tudo: bool,
+        /// Só o que está dentro da ref (form, diálogo, iframe).
+        #[arg(long)]
+        dentro: Option<String>,
+        /// Máximo de linhas (padrão 300; 2000 com --tudo).
+        #[arg(long)]
+        max: Option<usize>,
+        /// Mostra o destino de todos os links.
+        #[arg(long)]
+        href: bool,
+    },
+    /// Clica (mouse via CDP) num elemento, por ref ou texto, e mostra o que mudou.
+    Click {
+        alvo: String,
+        /// Usa el.click() em vez do mouse (elemento coberto ou sem caixa).
+        #[arg(long)]
+        js: bool,
+        #[command(flatten)]
+        acao: OpAcao,
+    },
+    /// Preenche um campo de texto (substitui o conteúdo).
+    Fill {
+        alvo: String,
+        valor: String,
+        /// Digita tecla por tecla em vez de inserir o texto de uma vez.
+        #[arg(long)]
+        teclas: bool,
+        #[command(flatten)]
+        acao: OpAcao,
+    },
+    /// Escolhe uma opção: select nativo, combobox, autocomplete ou menu.
+    Pick {
+        alvo: String,
+        opcao: String,
+        #[command(flatten)]
+        acao: OpAcao,
+    },
+    /// Marca (ou desmarca) checkbox, radio ou switch.
+    Check {
+        alvo: String,
+        /// Desmarca.
+        #[arg(long)]
+        nao: bool,
+        #[command(flatten)]
+        acao: OpAcao,
+    },
+    /// Envia arquivo(s) a um input de arquivo ou ao botão que abre o seletor.
+    Upload {
+        alvo: String,
+        #[arg(required = true)]
+        arquivos: Vec<PathBuf>,
+        #[command(flatten)]
+        acao: OpAcao,
+    },
+    /// Pressiona teclas (Enter, Tab, Escape, Control+a, ...) no foco atual ou no elemento --em.
+    Key {
+        #[arg(required = true)]
+        teclas: Vec<String>,
+        /// Foca este elemento (ref ou texto) antes.
+        #[arg(long)]
+        em: Option<String>,
+        #[command(flatten)]
+        acao: OpAcao,
+    },
+    /// Espera texto, seletor, URL ou requisição (desde a última ação).
+    Wait {
+        #[arg(value_parser = ["text", "sel", "url", "net"])]
+        tipo: String,
+        valor: String,
+        /// Espera sumir em vez de aparecer (text, sel).
+        #[arg(long)]
+        sumir: bool,
+        /// Segundos.
+        #[arg(long, default_value_t = 15)]
+        max: u64,
+    },
     /// Processo do daemon (usado pelo `nd start`).
     #[command(hide = true)]
     Daemon(Abertura),
 }
+
+/// Tempo máximo de espera do cliente por comandos que navegam ou agem.
+const LONGO: Duration = Duration::from_secs(200);
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
@@ -88,19 +181,81 @@ fn main() -> ExitCode {
         Cmd::Daemon(a) => rodar_daemon(a),
         Cmd::Stop => parar(),
         Cmd::Status => comando("status", json!({}), Duration::from_secs(30)),
-        Cmd::Open { url, nova } => comando(
+        Cmd::Open { url, nova, sem_map } => comando(
             "open",
-            json!({ "url": url, "nova": nova }),
-            Duration::from_secs(200),
+            json!({ "url": url, "nova": nova, "sem_map": sem_map }),
+            LONGO,
+        ),
+        Cmd::Map {
+            tudo,
+            dentro,
+            max,
+            href,
+        } => comando(
+            "map",
+            json!({ "tudo": tudo, "dentro": dentro, "max": max, "href": href }),
+            LONGO,
+        ),
+        Cmd::Click { alvo, js, acao } => comando(
+            "click",
+            json!({ "alvo": alvo, "js": js, "sem_diff": acao.sem_diff }),
+            LONGO,
+        ),
+        Cmd::Fill {
+            alvo,
+            valor,
+            teclas,
+            acao,
+        } => comando(
+            "fill",
+            json!({ "alvo": alvo, "valor": valor, "teclas": teclas, "sem_diff": acao.sem_diff }),
+            LONGO,
+        ),
+        Cmd::Pick { alvo, opcao, acao } => comando(
+            "pick",
+            json!({ "alvo": alvo, "opcao": opcao, "sem_diff": acao.sem_diff }),
+            LONGO,
+        ),
+        Cmd::Check { alvo, nao, acao } => comando(
+            "check",
+            json!({ "alvo": alvo, "desmarcar": nao, "sem_diff": acao.sem_diff }),
+            LONGO,
+        ),
+        Cmd::Upload { alvo, arquivos, acao } => match arquivos
+            .iter()
+            .map(|f| std::path::absolute(f).map(|p| p.display().to_string()))
+            .collect::<Result<Vec<_>, _>>()
+        {
+            Ok(arquivos) => comando(
+                "upload",
+                json!({ "alvo": alvo, "arquivos": arquivos, "sem_diff": acao.sem_diff }),
+                LONGO,
+            ),
+            Err(e) => Err(e.to_string()),
+        },
+        Cmd::Key { teclas, em, acao } => comando(
+            "key",
+            json!({ "alvo": em, "teclas": teclas, "sem_diff": acao.sem_diff }),
+            LONGO,
+        ),
+        Cmd::Wait {
+            tipo,
+            valor,
+            sumir,
+            max,
+        } => comando(
+            "wait",
+            json!({ "tipo": tipo, "valor": valor, "sumir": sumir, "max": max }),
+            Duration::from_secs(max + 30),
         ),
         Cmd::Tabs => comando("tabs", json!({}), Duration::from_secs(30)),
         Cmd::Tab { alvo } => comando("tab", json!({ "alvo": alvo }), Duration::from_secs(30)),
         Cmd::Eval { js, arquivo } => match (js, arquivo) {
             (_, Some(f)) => match std::fs::read_to_string(&f) {
-                Ok(js) => comando("eval", json!({ "js": js }), Duration::from_secs(200)),
+                Ok(js) => comando("eval", json!({ "js": js }), LONGO),
                 Err(e) => Err(format!("{}: {e}", f.display())),
             },
-            (Some(js), None) => comando("eval", json!({ "js": js }), Duration::from_secs(200)),
+            (Some(js), None) => comando("eval", json!({ "js": js }), LONGO),
             (None, None) => Err("informe o JavaScript ou -f arquivo.js".into()),
         },
         Cmd::Text { sel, max } => comando("text", json!({ "sel": sel, "max": max }), Duration::from_secs(60)),

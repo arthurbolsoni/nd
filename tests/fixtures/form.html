@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Cadastro</title>
+<style>
+  body { font-family: sans-serif; margin: 20px; }
+  .card { cursor: pointer; padding: 8px; border: 1px solid #999; width: 200px; }
+  .card span { display: block; }
+  .escondido { position: absolute; opacity: 0; width: 1px; height: 1px; }
+  .caixa { display: inline-block; width: 14px; height: 14px; border: 1px solid #333; }
+  #lista, #cores { list-style: none; padding: 0; margin: 0; border: 1px solid #ccc; width: 200px; }
+  #lista[hidden], #cores[hidden] { display: none; }
+  #lista li, #cores li { padding: 4px; cursor: pointer; }
+  #overlay { position: fixed; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.3); }
+  #overlay div { background: white; position: absolute; bottom: 20px; left: 20px; padding: 10px; }
+  iframe { width: 400px; height: 160px; border: 1px solid #333; }
+  .longe { margin-top: 3000px; }
+</style>
+</head>
+<body>
+<h1>Cadastro de candidato</h1>
+<form id="dados" aria-label="Dados pessoais" onsubmit="event.preventDefault(); enviar();">
+  <label for="nome">Nome</label>
+  <input id="nome" required>
+  <span id="eco"></span>
+  <label>E-mail <input id="email" type="email" required></label>
+  <label for="estado">Estado</label>
+  <select id="estado">
+    <option value="">Selecione</option>
+    <option value="SP">São Paulo</option>
+    <option value="RJ">Rio de Janeiro</option>
+    <option value="MG">Minas Gerais</option>
+  </select>
+  <label><input id="termos" type="checkbox" class="escondido"><span class="caixa"></span> Aceito os termos</label>
+  <div>
+    <input id="cidade" role="combobox" aria-autocomplete="list" aria-controls="lista" placeholder="Cidade" autocomplete="off">
+    <ul id="lista" role="listbox" hidden></ul>
+  </div>
+  <div id="corbtn" role="button" aria-haspopup="listbox" tabindex="0">Escolha a cor</div>
+  <ul id="cores" role="listbox" hidden>
+    <li role="option">Azul</li>
+    <li role="option">Verde</li>
+    <li role="option">Vermelho</li>
+  </ul>
+  <textarea id="obs" placeholder="Observações"></textarea>
+  <button id="salvar" type="submit">Salvar</button>
+</form>
+<div id="msg" role="alert"></div>
+<p id="resultado"></p>
+
+<button id="trocar" type="button">Trocar botão</button>
+<div id="lugar"><button id="alvo" type="button" onclick="document.getElementById('resultado').textContent = 'alvo clicado'">Confirmar pedido</button></div>
+
+<div class="card" id="card"><span>Card clicável</span><span>com duas linhas</span></div>
+
+<button id="avisar" type="button" onclick="alert('Salvo!'); document.getElementById('resultado').textContent = 'depois do alert'">Avisar</button>
+<button id="carregar" type="button">Carregar dados</button>
+<p id="dados-api"></p>
+
+<input id="arquivo" type="file">
+<button id="anexar" type="button" onclick="document.getElementById('oculto').click()">Anexar currículo</button>
+<input id="oculto" type="file" style="display:none">
+<p id="arquivos"></p>
+
+<button id="abrir" type="button" onclick="document.getElementById('dlg').showModal()">Abrir diálogo</button>
+<dialog id="dlg" aria-label="Confirmação">
+  <p>Tem certeza?</p>
+  <input id="motivo" placeholder="Motivo">
+  <button type="button" onclick="document.getElementById('dlg').close(); document.getElementById('resultado').textContent = 'confirmado: ' + document.getElementById('motivo').value">Confirmar</button>
+</dialog>
+
+<x-contador></x-contador>
+
+<a href="outra.html">Ir para outra página</a>
+
+<iframe id="mesmo" src="interno.html"></iframe>
+<iframe id="externo"></iframe>
+
+<div id="overlay"><div>Usamos cookies <button type="button" onclick="document.getElementById('overlay').remove()">Aceitar cookies</button></div></div>
+
+<button class="longe" type="button">Botão lá embaixo</button>
+
+<script>
+  // Input controlado como o do React: o valor só muda pelo evento input com valor diferente do
+  // rastreado; atribuir .value pelo setter da instância não muda o estado e é revertido.
+  const nome = document.getElementById('nome');
+  let estado = '';
+  let rastreado = '';
+  const desc = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+  Object.defineProperty(nome, 'value', {
+    get() { return desc.get.call(this); },
+    set(v) { rastreado = String(v); desc.set.call(this, v); },
+    configurable: true,
+  });
+  function render() { nome.value = estado; document.getElementById('eco').textContent = estado; }
+  nome.addEventListener('input', () => {
+    const atual = desc.get.call(nome);
+    if (atual !== rastreado) { rastreado = atual; estado = atual; }
+    render();
+  });
+
+  function enviar() {
+    const email = document.getElementById('email').value;
+    if (!email) { document.getElementById('msg').textContent = 'Informe o e-mail'; return; }
+    document.getElementById('msg').textContent = '';
+    document.getElementById('resultado').textContent = 'enviado: ' + estado + ' / ' + email + ' / '
+      + document.getElementById('estado').value + ' / ' + document.getElementById('termos').checked
+      + ' / ' + document.getElementById('cidade').value + ' / ' + document.getElementById('corbtn').textContent;
+  }
+
+  // Autocomplete: lista aparece 300 ms depois de digitar.
+  const cidades = ['São Paulo', 'São José dos Campos', 'Santos', 'Campinas', 'Curitiba'];
+  const cidade = document.getElementById('cidade');
+  const lista = document.getElementById('lista');
+  let t;
+  cidade.addEventListener('input', () => {
+    clearTimeout(t);
+    t = setTimeout(() => {
+      const k = cidade.value.toLowerCase();
+      lista.innerHTML = '';
+      for (const c of cidades.filter((c) => c.toLowerCase().includes(k))) {
+        const li = document.createElement('li');
+        li.setAttribute('role', 'option');
+        li.textContent = c;
+        li.addEventListener('mousedown', (ev) => { ev.preventDefault(); cidade.value = c; lista.hidden = true; });
+        lista.appendChild(li);
+      }
+      lista.hidden = !lista.children.length;
+    }, 300);
+  });
+
+  const corbtn = document.getElementById('corbtn');
+  const cores = document.getElementById('cores');
+  corbtn.addEventListener('click', () => { cores.hidden = !cores.hidden; corbtn.setAttribute('aria-expanded', String(!cores.hidden)); });
+  for (const li of cores.children) li.addEventListener('click', () => { corbtn.textContent = li.textContent; cores.hidden = true; });
+
+  // Re-render: troca o nó do botão por um igual.
+  document.getElementById('trocar').addEventListener('click', () => {
+    const lugar = document.getElementById('lugar');
+    lugar.innerHTML = '<button id="alvo" type="button">Confirmar pedido</button>';
+    lugar.firstChild.addEventListener('click', () => { document.getElementById('resultado').textContent = 'alvo novo clicado'; });
+  });
+
+  document.getElementById('card').addEventListener('click', () => {
+    document.getElementById('resultado').textContent = 'card clicado';
+  });
+
+  document.getElementById('carregar').addEventListener('click', async () => {
+    const r = await fetch('/api/lenta');
+    const j = await r.json();
+    document.getElementById('dados-api').textContent = 'valor ' + j.valor;
+  });
+
+  for (const id of ['arquivo', 'oculto']) {
+    document.getElementById(id).addEventListener('change', (ev) => {
+      document.getElementById('arquivos').textContent = id + ': ' + [...ev.target.files].map((f) => f.name).join(',');
+    });
+  }
+
+  customElements.define('x-contador', class extends HTMLElement {
+    connectedCallback() {
+      const r = this.attachShadow({ mode: 'open' });
+      r.innerHTML = '<button>Somar</button><span>0</span>';
+      let n = 0;
+      r.querySelector('button').addEventListener('click', () => { r.querySelector('span').textContent = String(++n); });
+    }
+  });
+
+  // Iframe de outro site: mesmo servidor por "localhost" (a página abre por 127.0.0.1).
+  document.getElementById('externo').src = 'http://localhost:' + location.port + '/quadro.html';
+</script>
+</body>
+</html>

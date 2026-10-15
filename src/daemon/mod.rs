@@ -1,7 +1,9 @@
 //! `nd daemon`: segura o Edge e a conexão CDP e atende os comandos do cliente por HTTP em
 //! 127.0.0.1, um de cada vez.
 
+pub mod acoes;
 pub mod comandos;
+pub mod pagina;
 pub mod rede;
 
 use std::collections::HashSet;
@@ -39,6 +41,7 @@ pub struct Daemon {
     /// Target id da aba em que os comandos atuam.
     pub atual: Mutex<Option<String>>,
     pub rede: rede::Rede,
+    pub paginas: pagina::Paginas,
     /// Abas com `Network` ligado e eventos sendo acompanhados.
     preparadas: Mutex<HashSet<String>>,
     fila: tokio::sync::Mutex<()>,
@@ -85,6 +88,7 @@ pub async fn rodar(op: Opcoes) -> Result<(), String> {
         token: token.clone(),
         atual: Mutex::new(None),
         rede: rede::Rede::default(),
+        paginas: pagina::Paginas::default(),
         preparadas: Mutex::new(HashSet::new()),
         fila: tokio::sync::Mutex::new(()),
         parar: Notify::new(),
@@ -198,16 +202,45 @@ pub async fn preparar_aba(d: &Arc<Daemon>, alvo: &str) -> nodriver::Result<Tab> 
                 d.rede.evento(&alvo_, &ev);
             }
         });
+        let mut dialogos = tab.subscribe_raw(Some("Page.javascriptDialogOpening"));
+        let fraco = Arc::downgrade(d);
+        let tab_ = tab.clone();
+        tokio::spawn(async move {
+            while let Some(ev) = dialogos.next().await {
+                let Some(d) = fraco.upgrade() else { break };
+                aceitar_dialogo(&d, &tab_, &ev.params).await;
+            }
+        });
         ligar_dominios(d, &tab).await;
     }
     Ok(tab)
 }
 
+/// Aceita `alert`/`confirm`/`prompt`/`beforeunload` (a ação que o abriu foi pedida) e guarda o
+/// texto para a saída do comando.
+async fn aceitar_dialogo(d: &Daemon, tab: &Tab, p: &serde_json::Value) {
+    let tipo = p["type"].as_str().unwrap_or("alert");
+    let msg = p["message"].as_str().unwrap_or("");
+    let r = tab
+        .call(
+            "Page.handleJavaScriptDialog",
+            json!({ "accept": true, "promptText": p["defaultPrompt"].as_str().unwrap_or("") }),
+        )
+        .await;
+    if let Err(e) = r {
+        tracing::warn!("diálogo {tipo} em {}: {e}", tab.target_id());
+    }
+    d.paginas
+        .dialogo(tab.target_id(), format!("diálogo {tipo} {msg:?} aceito"));
+}
+
 /// Domínios que o daemon precisa em cada aba. Uma reconexão cria sessões novas, onde eles
 /// voltam desligados.
 async fn ligar_dominios(d: &Daemon, tab: &Tab) {
-    if let Err(e) = tab.call("Network.enable", json!({})).await {
-        tracing::warn!("Network.enable em {}: {e}", tab.target_id());
+    for dominio in ["Network.enable", "Page.enable"] {
+        if let Err(e) = tab.call(dominio, json!({})).await {
+            tracing::warn!("{dominio} em {}: {e}", tab.target_id());
+        }
     }
     if d.opcoes.oculto
         && let Err(e) = tab
@@ -245,6 +278,7 @@ async fn acompanhar_alvos(d: &Arc<Daemon>) {
                 ("Target.targetDestroyed", Some(id)) => {
                     d.preparadas.lock().unwrap().remove(id);
                     d.rede.remover(id);
+                    d.paginas.remover(id);
                     let mut atual = d.atual.lock().unwrap();
                     if atual.as_deref() == Some(id) {
                         *atual = None;

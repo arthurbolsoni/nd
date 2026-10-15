@@ -1,98 +1,11 @@
-//! Testes do `nd` de ponta a ponta: daemon de verdade, Edge headless com perfil temporário,
-//! estado num diretório próprio (`ND_DIR`) e páginas locais.
+//! Testes do `nd` de ponta a ponta: comandos base (start, open, eval, abas, stop).
 
-use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+mod comum;
+
+use std::process::Command;
 use std::time::{Duration, Instant};
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpListener;
-
-struct Nd {
-    dir: tempfile::TempDir,
-}
-
-impl Nd {
-    fn new() -> Self {
-        Self {
-            dir: tempfile::tempdir().unwrap(),
-        }
-    }
-
-    fn run(&self, args: &[&str]) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_nd"))
-            .args(args)
-            .env("ND_DIR", self.dir.path())
-            .output()
-            .unwrap()
-    }
-
-    /// Roda e exige sucesso; devolve o stdout.
-    fn ok(&self, args: &[&str]) -> String {
-        let o = self.run(args);
-        let out = String::from_utf8_lossy(&o.stdout).to_string();
-        let err = String::from_utf8_lossy(&o.stderr).to_string();
-        assert!(
-            o.status.success(),
-            "nd {args:?} falhou\nstdout: {out}\nstderr: {err}\nlog: {}",
-            self.log()
-        );
-        out
-    }
-
-    fn log(&self) -> String {
-        std::fs::read_to_string(self.dir.path().join("daemon.log")).unwrap_or_default()
-    }
-
-    fn estado(&self) -> PathBuf {
-        self.dir.path().join("daemon.json")
-    }
-}
-
-impl Drop for Nd {
-    fn drop(&mut self) {
-        if self.estado().exists() {
-            let _ = self.run(&["stop"]);
-        }
-    }
-}
-
-/// Serve `tests/fixtures`; `/api/lenta` responde depois de 1,5 s.
-async fn servir() -> String {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let porta = listener.local_addr().unwrap().port();
-    let raiz = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
-    tokio::spawn(async move {
-        loop {
-            let Ok((mut s, _)) = listener.accept().await else {
-                break;
-            };
-            let raiz = raiz.clone();
-            tokio::spawn(async move {
-                let mut buf = vec![0u8; 8192];
-                let n = s.read(&mut buf).await.unwrap_or(0);
-                let req = String::from_utf8_lossy(&buf[..n]);
-                let caminho = req.split_whitespace().nth(1).unwrap_or("/").to_string();
-                let (status, tipo, corpo): (&str, &str, Vec<u8>) = if caminho == "/api/lenta" {
-                    tokio::time::sleep(Duration::from_millis(1500)).await;
-                    ("200 OK", "application/json", br#"{"valor":42}"#.to_vec())
-                } else {
-                    match std::fs::read(raiz.join(caminho.trim_start_matches('/'))) {
-                        Ok(b) => ("200 OK", "text/html; charset=utf-8", b),
-                        Err(_) => ("404 Not Found", "text/plain", b"404".to_vec()),
-                    }
-                };
-                let cab = format!(
-                    "HTTP/1.1 {status}\r\nContent-Type: {tipo}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                    corpo.len()
-                );
-                let _ = s.write_all(cab.as_bytes()).await;
-                let _ = s.write_all(&corpo).await;
-            });
-        }
-    });
-    format!("http://127.0.0.1:{porta}")
-}
+use comum::{Nd, servir, vivo};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn fluxo_completo() {
@@ -111,8 +24,9 @@ async fn fluxo_completo() {
 
     // open espera a requisição lenta e a mudança do DOM depois dela.
     let saida = nd.ok(&["open", &format!("{base}/lento.html")]);
-    assert!(saida.starts_with("Lento\n"), "{saida}");
+    assert!(saida.starts_with("# Lento — 127.0.0.1"), "{saida}");
     assert!(saida.contains("estável em"), "{saida}");
+    assert!(saida.contains("h1 Página lenta"), "{saida}");
     assert!(!saida.contains("aviso"), "{saida}");
     let texto = nd.ok(&["text", "--sel", "#dados"]);
     assert_eq!(texto.trim(), "dados: 42");
@@ -201,12 +115,4 @@ async fn daemon_some_quando_o_edge_morre() {
         nd.log()
     );
     assert!(!nd.estado().exists());
-}
-
-fn vivo(pid: u64) -> bool {
-    let o = Command::new("tasklist")
-        .args(["/FI", &format!("PID eq {pid}"), "/NH", "/FO", "CSV"])
-        .output()
-        .unwrap();
-    String::from_utf8_lossy(&o.stdout).contains(&format!("\"{pid}\""))
 }

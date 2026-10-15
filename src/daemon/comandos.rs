@@ -6,18 +6,15 @@ use std::time::{Duration, Instant};
 
 use nodriver::{Error, Tab};
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{Value, json};
 
+use super::acoes::{self, Acao, AcaoArgs};
+use super::pagina::{self, OpFormato, OpMapa};
 use super::{Daemon, preparar_aba};
 use crate::cliente::Pedido;
 
-const ESTABILIZAR_JS: &str = include_str!("../js/estabilizar.js");
 /// Espera máxima por rede ociosa + DOM parado depois de uma navegação.
 const ESPERA_MAX: Duration = Duration::from_secs(10);
-/// Rede sem requisição em andamento por este tempo = ociosa.
-const REDE_OCIOSA: Duration = Duration::from_millis(500);
-/// DOM sem mutação por este tempo = parado.
-const DOM_PARADO_MS: u64 = 300;
 
 type R = Result<String, String>;
 
@@ -46,6 +43,40 @@ pub async fn executar(d: &Arc<Daemon>, p: &Pedido) -> R {
         "tab" => tab(d, args(p)?).await,
         "eval" => eval(d, args(p)?).await,
         "text" => text(d, args(p)?).await,
+        "map" => acoes::map(d, args(p)?).await,
+        "click" => {
+            let x: ClickArgs = args(p)?;
+            acoes::agir(d, x.base, Acao::Click { js: x.js }).await
+        }
+        "fill" => {
+            let x: FillArgs = args(p)?;
+            acoes::agir(
+                d,
+                x.base,
+                Acao::Fill {
+                    valor: x.valor,
+                    teclas: x.teclas,
+                },
+            )
+            .await
+        }
+        "pick" => {
+            let x: PickArgs = args(p)?;
+            acoes::agir(d, x.base, Acao::Pick { opcao: x.opcao }).await
+        }
+        "check" => {
+            let x: CheckArgs = args(p)?;
+            acoes::agir(d, x.base, Acao::Check { marcar: !x.desmarcar }).await
+        }
+        "upload" => {
+            let x: UploadArgs = args(p)?;
+            acoes::agir(d, x.base, Acao::Upload { arquivos: x.arquivos }).await
+        }
+        "key" => {
+            let x: KeyArgs = args(p)?;
+            acoes::agir(d, x.base, Acao::Key { teclas: x.teclas }).await
+        }
+        "wait" => acoes::wait(d, args(p)?).await,
         outro => Err(format!("comando desconhecido: {outro}")),
     }
 }
@@ -103,10 +134,59 @@ async fn paginas(d: &Daemon) -> Result<Vec<(String, String, String)>, String> {
 }
 
 #[derive(Deserialize)]
+struct ClickArgs {
+    #[serde(flatten)]
+    base: AcaoArgs,
+    #[serde(default)]
+    js: bool,
+}
+
+#[derive(Deserialize)]
+struct FillArgs {
+    #[serde(flatten)]
+    base: AcaoArgs,
+    valor: String,
+    #[serde(default)]
+    teclas: bool,
+}
+
+#[derive(Deserialize)]
+struct PickArgs {
+    #[serde(flatten)]
+    base: AcaoArgs,
+    opcao: String,
+}
+
+#[derive(Deserialize)]
+struct CheckArgs {
+    #[serde(flatten)]
+    base: AcaoArgs,
+    #[serde(default)]
+    desmarcar: bool,
+}
+
+#[derive(Deserialize)]
+struct UploadArgs {
+    #[serde(flatten)]
+    base: AcaoArgs,
+    arquivos: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct KeyArgs {
+    #[serde(flatten)]
+    base: AcaoArgs,
+    teclas: Vec<String>,
+}
+
+#[derive(Deserialize)]
 struct OpenArgs {
     url: String,
     #[serde(default)]
     nova: bool,
+    /// Não imprime o mapa da página depois de carregar.
+    #[serde(default)]
+    sem_map: bool,
 }
 
 async fn open(d: &Arc<Daemon>, a: OpenArgs) -> R {
@@ -121,21 +201,65 @@ async fn open(d: &Arc<Daemon>, a: OpenArgs) -> R {
         aba_atual(d).await?
     };
     d.rede.limpar(tab.target_id());
+    let t0 = Instant::now();
     let mut avisos = Vec::new();
-    match tab.navigate(&url).await {
-        Ok(()) => {}
-        Err(Error::Timeout(_)) => avisos.push("o evento load não disparou em 30 s".to_string()),
-        Err(x) => return Err(e(x)),
+    if let Some(av) = navegar(&tab, &url).await? {
+        avisos.push(av);
     }
-    let espera = estabilizar(d, &tab, ESPERA_MAX).await;
+    let espera = pagina::estabilizar(d, &tab, t0, ESPERA_MAX).await;
     avisos.extend(espera.avisos());
-    let titulo = tab.title().await.unwrap_or_default();
-    let atual = tab.url().await.unwrap_or_default();
-    let mut s = format!("{titulo}\n{atual}\n{}", espera.resumo());
-    for a in avisos {
-        s.push_str(&format!("\naviso: {a}"));
+    let mut extra = vec![espera.resumo()];
+    extra.extend(avisos.into_iter().map(|av| format!("aviso: {av}")));
+    if a.sem_map {
+        let titulo = tab.title().await.unwrap_or_default();
+        let atual = tab.url().await.unwrap_or_default();
+        return Ok(format!("{titulo}\n{atual}\n{}", extra.join("\n")));
     }
-    Ok(s)
+    // Mapa logo depois de abrir: o cabeçalho dele já traz título e URL.
+    let inst = pagina::instantaneo(d, &tab, &OpMapa::default()).await?;
+    let mapa = pagina::formatar(&inst, &OpFormato::default());
+    let (cab, resto) = mapa.split_once('\n').unwrap_or((&mapa, ""));
+    Ok(format!("{cab}\n{}\n{resto}", extra.join("\n"))
+        .trim_end()
+        .to_string())
+}
+
+/// Navega e espera o documento novo entrar (commit) e o DOMContentLoaded (até 3 s); o resto, a
+/// estabilização espera. Devolve um aviso se o commit não veio.
+async fn navegar(tab: &Tab, url: &str) -> Result<Option<String>, String> {
+    // Aba recém-criada pode ainda não ter o Page ligado (o preparo dela corre em paralelo).
+    tab.call("Page.enable", json!({})).await.map_err(e)?;
+    let mut navegou = tab.subscribe_raw(Some("Page.frameNavigated"));
+    let mut dcl = tab.subscribe_raw(Some("Page.domContentEventFired"));
+    let r = tab
+        .call("Page.navigate", json!({ "url": url }))
+        .await
+        .map_err(e)?;
+    if let Some(erro) = r["errorText"].as_str() {
+        return Err(format!("{url}: {erro}"));
+    }
+    let Some(loader) = r["loaderId"].as_str() else {
+        // Navegação no mesmo documento (âncora).
+        return Ok(None);
+    };
+    let espera = async {
+        while let Some(ev) = navegou.next().await {
+            let f = &ev.params["frame"];
+            if f["parentId"].is_null() && f["loaderId"].as_str() == Some(loader) {
+                return true;
+            }
+        }
+        false
+    };
+    match tokio::time::timeout(Duration::from_secs(30), espera).await {
+        Ok(true) => {}
+        Ok(false) => return Err(e(Error::Disconnected)),
+        Err(_) => return Ok(Some("o documento novo não entrou em 30 s".into())),
+    }
+    // Dá ao parser até 3 s para o DOMContentLoaded; página em streaming (Facebook) passa daqui
+    // com o HTML ainda chegando.
+    let _ = tokio::time::timeout(Duration::from_secs(3), dcl.next()).await;
+    Ok(None)
 }
 
 fn normalizar_url(url: &str) -> String {
@@ -144,56 +268,6 @@ fn normalizar_url(url: &str) -> String {
         u.to_string()
     } else {
         format!("https://{u}")
-    }
-}
-
-pub struct Espera {
-    pub ms: u128,
-    pub pendentes: usize,
-    pub dom_parado: bool,
-}
-
-impl Espera {
-    fn resumo(&self) -> String {
-        format!("estável em {:.1} s", self.ms as f64 / 1000.0)
-    }
-
-    fn avisos(&self) -> Vec<String> {
-        let mut v = Vec::new();
-        if self.pendentes > 0 {
-            v.push(format!(
-                "{} requisição(ões) ainda abertas depois de {} s",
-                self.pendentes,
-                ESPERA_MAX.as_secs()
-            ));
-        }
-        if !self.dom_parado {
-            v.push("o DOM ainda estava mudando".into());
-        }
-        v
-    }
-}
-
-/// Espera rede ociosa e DOM parado, até `max`.
-pub async fn estabilizar(d: &Daemon, tab: &Tab, max: Duration) -> Espera {
-    let inicio = Instant::now();
-    loop {
-        let (n, ociosa) = d.rede.situacao(tab.target_id());
-        if (n == 0 && ociosa >= REDE_OCIOSA) || inicio.elapsed() >= max {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    let restante = max.saturating_sub(inicio.elapsed()).max(Duration::from_secs(1));
-    let expr = format!("({ESTABILIZAR_JS})({DOM_PARADO_MS}, {})", restante.as_millis());
-    let dom_parado = match tab.evaluate(&expr).await {
-        Ok(v) => v["quieto"].as_bool().unwrap_or(false),
-        Err(_) => false,
-    };
-    Espera {
-        ms: inicio.elapsed().as_millis(),
-        pendentes: d.rede.situacao(tab.target_id()).0,
-        dom_parado,
     }
 }
 

@@ -135,3 +135,74 @@
   carrega sem verificação. O perfil tem o cookie `g_state` (Google One Tap).
 - No atlas do LinkedIn (fase 6): não usar "Continuar com Google"; conferir a conta ativa pelo
   link `/in/arthurxavierbolsoni/` no feed.
+
+## 2026-10-15 — fase 3 (map + ações)
+
+### Decisões
+
+- A biblioteca da página (`src/js/nd.js`) roda num mundo isolado por quadro
+  (`Page.createIsolatedWorld`, nome `nd`). A página não vê as funções nem as refs, e protótipos
+  alterados pelo site não afetam o mapa. `nd eval` continua no mundo da página.
+- Refs ficam num registro em memória do mundo isolado (ref → `WeakRef` do elemento), em vez do
+  atributo `data-nd` do plano. Atributo no DOM é visível ao site, dispara `MutationObserver` dele
+  e some junto com o nó no re-render do mesmo jeito.
+- Localizador de reserva no daemon: papel + nome + posição entre iguais. Ref de nó trocado pelo
+  re-render é achada de novo; ref de documento anterior dá "ref de uma página anterior".
+- Refs recomeçam em `e1` quando o documento principal muda (`performance.timeOrigin`).
+- Iframe do mesmo domínio é lido por dentro (`contentDocument`). Iframe de outro domínio: o
+  daemon pega o `frameId` do elemento (`DOM.describeNode`); se há target `iframe` com esse id
+  (outro processo), usa a sessão dele, senão cria o mundo isolado no frame pela sessão da aba.
+  Até 10 iframes e 3 níveis por mapa.
+- Clique: ponto calculado no quadro (com `elementFromPoint` em vários pontos da caixa) mais a
+  origem de cada iframe até o principal; mouse via `Input.dispatchMouseEvent` na aba. Elemento
+  coberto dá erro com a ref e o texto de quem cobre; `--js` usa `el.click()`.
+- `fill`: foco, seleciona o conteúdo, `Input.insertText` (ou tecla por tecla com `--teclas`);
+  confere o valor e, se a digitação não pegou, usa o setter nativo + `input`/`change`. Num iframe
+  de outro domínio clica antes, para o foco do teclado ir para o quadro.
+- `pick`: `<select>` nativo por texto ou value; senão digita (campo) ou clica (botão) e espera até
+  5 s por uma opção visível (`role=option`, `menuitem`, `li` de `listbox`/`menu`).
+- `upload` em botão/label: `Page.setInterceptFileChooserDialog` + clique + `fileChooserOpened` →
+  `DOM.setFileInputFiles` pelo `backendNodeId`.
+- Diálogos (`alert`, `confirm`, `prompt`, `beforeunload`) são aceitos pelo daemon e aparecem na
+  saída do comando. O daemon liga `Page.enable` em toda aba.
+- `nd open` imprime o mapa (cabeçalho, linha de espera, elementos); `--sem-map` só título, URL e
+  espera.
+- Diff pós-ação: URL, título, avisos novos, elementos novos (`+`), sumidos (`-`), mudados (`~`) e
+  linhas de texto visível novas (inclui shadow DOM e iframes). Nó trocado pelo re-render com a
+  mesma descrição não entra. Documento novo → "página nova" + mapa.
+- Mapa: até 300 linhas. Página maior → recorte na área visível (uma tela acima, duas abaixo) com
+  a contagem do que ficou acima e abaixo. Diálogo modal aberto → só ele.
+- Teclas com modificador (`Control+a`, `Shift+Tab`, `Alt+ArrowLeft`) e F1–F12 no `press_key` da
+  biblioteca (commit no fork).
+
+### Espera depois de navegar ou agir
+
+- Navegação: espera o commit (`Page.frameNavigated` do frame principal com o `loaderId`) e o
+  `DOMContentLoaded` por até 3 s. O Marketplace do Facebook manda o HTML em streaming e o
+  `DOMContentLoaded` vem aos ~10 s, com a página já utilizável.
+- Rede ociosa (500 ms, contados a partir da ação): documento principal até a resposta começar;
+  script e CSS de qualquer origem; XHR/fetch só do mesmo site (domínio registrável). Fora:
+  imagem, fonte, mídia, beacon, EventSource/WebSocket, `blob:`/`data:`, hosts e caminhos de
+  anúncio e métricas, documento de iframe, requisição aberta há mais de 5 s.
+- DOM parado: 300 ms sem mudança de estrutura ou texto (atributos ficam de fora: carrossel e
+  animação mudam atributo o tempo todo), até 3 s.
+- Medido (release, headless, perfil temporário, pt-BR): Wikipedia 1,4 s; Facebook 2,1 s;
+  Marketplace deslogado 4,5 s no total; GitHub 1,6 s (5 s na primeira carga a frio); g1 4–8 s.
+  No g1 a rede do site termina em ~2 s e o `Runtime.evaluate` do teste de DOM parado só volta
+  seis segundos depois: a thread da página está ocupada pelos scripts de anúncio.
+- `nd map` sozinho: 55–75 ms nessas páginas.
+
+### Outros achados
+
+- O documento de um iframe de outro processo começa na sessão da aba (`requestWillBeSent`) e
+  termina na sessão do target dele; contado, segurava a espera até o teto.
+- Aba criada pelo `open --nova` podia receber o `Page.navigate` antes do `Page.enable` do
+  preparo (que corre em paralelo com a descoberta de alvos) e o commit não chegava; o `open` liga
+  o `Page` antes de navegar.
+- `innerText` do body não inclui o conteúdo de shadow DOM; o texto do diff junta o de cada shadow
+  root aberto.
+- `checkVisibility()` dá falso para `display: contents` (sem caixa); o mapa desce nos filhos.
+- `www.mercadolivre.com.br` no headless com perfil temporário: página de erro em espanhol
+  ("Hubo un error accediendo a esta pagina").
+- Uma execução da suíte inteira teve `nd open` do `lento.html` falhando no `fluxo_completo`
+  (stderr não guardado); não repetiu em sete execuções seguidas.
