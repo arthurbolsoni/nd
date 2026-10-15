@@ -129,3 +129,9 @@
   ("Vamos fazer uma verificação rápida de segurança").
 - A verificação precisa de ação humana no Edge visível. Não se sabe se a visita do `nd` a disparou
   ou se já estava pendente.
+- Esclarecido pelo Arthur: o LinkedIn entrava sozinho pelo login do Google (Gmail), numa conta
+  que não é a dele. A restrição ("O acesso à sua conta foi temporariamente restrito") era dessa
+  conta. Com o Edge visível, a sessão passou a ser a conta `arthurxavierbolsoni` e o `/feed/`
+  carrega sem verificação. O perfil tem o cookie `g_state` (Google One Tap).
+- No atlas do LinkedIn (fase 6): não usar "Continuar com Google"; conferir a conta ativa pelo
+  link `/in/arthurxavierbolsoni/` no feed.
