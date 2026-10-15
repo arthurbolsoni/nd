@@ -76,9 +76,11 @@ Commit `e6f836a` no fork.
 
 ## 6. Atlas + replay
 
-- [ ] Formato YAML + serde
-- [ ] `nd atlas <site>`
-- [ ] `nd run` com parâmetros, `--ate`, `confirmar`, parada com map + net no passo que falhou
+- [x] Formato YAML + serde (`serde_yaml_ng`), atlas em `~/nodriver/sites/` (`ND_ATLAS` muda)
+- [x] `nd atlas` (lista), `nd atlas <site>`, `nd atlas --rascunho` (passos da sessão pelo nome)
+- [x] `nd run` com parâmetros, `--ate`, `--desde`, `confirmar` + `--confirmado`, `opcional`,
+  checagem de login, `--seco`, parada com map + net e comando para retomar no passo que falhou
+- [x] Testes: `tests/atlas.rs` e unitários de passo, parâmetros e pedidos
 
 ## 7. Skill e regra
 

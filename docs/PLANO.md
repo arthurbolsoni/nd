@@ -161,23 +161,35 @@ armadilhas:
   - "Upload do CV dentro de iframe de outro domínio"
 fluxos:
   candidatar:
-    params: [url, cv]
+    login: false
+    params: [url, cv]          # ou mapa nome: padrão
     passos:
       - open: "{url}"
-      - fill: { nome: "Nome", valor: "Arthur Bolsoni" }
-      - upload: { nome: "Resume", arquivo: "{cv}" }
-      - click: { nome: "Submit Application", confirmar: true }
+      - click: Aceitar cookies
+        opcional: true
+      - fill: { alvo: "Nome", valor: "Arthur Bolsoni" }
+      - upload: { alvo: "Resume", arquivo: "{cv}" }
+      - click: { alvo: "Submit Application", confirmar: true }
       - esperar: { texto: "Thanks for applying" }
 ```
 
-- Passos por nome e role, não por ref.
+- Passos por nome (o texto que o `nd` aceita como alvo), não por ref; `nome` vale como `alvo`.
+- Ações: `open`, `click`, `fill`, `pick`, `check`, `upload`, `key`, `wait`/`esperar`, `download`,
+  `eval`, `text`, `tab`, `pdf`, com os mesmos campos das opções da linha de comando.
+- `opcional: true`: falha não para o fluxo. `confirmar: true`: o replay para antes do passo.
+- `open` com caminho (`/x`) vai para `https://<site>/x`.
+- `login: true` no fluxo: depois do primeiro `open`, `login.checar` precisa dar `true`.
 - Sem cookie, token, senha ou dado pessoal além do que o fluxo usa; o resto vira `{param}`.
 
 ### Replay
 
 `nd run <site> <fluxo> -p k=v`: executa os passos sem LLM. Falha num passo para ali e imprime
-número do passo, erro, `nd map` e `nd net` recente. Passo com `confirmar: true` não roda no
-replay; `--ate N` limita até o passo N.
+número do passo, erro, `nd map` e `nd net` recente e o comando para retomar. Passo com
+`confirmar: true` para o replay antes dele; `--desde N --confirmado` segue depois do ok do
+usuário. `--ate N` limita até o passo N; `--seco` mostra os passos com os parâmetros trocados.
+
+`nd atlas --rascunho`: os passos feitos na sessão do daemon, em YAML, com o alvo pelo nome
+(ref usada vira o nome do elemento), para virar fluxo.
 
 ### Skill e regra
 

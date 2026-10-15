@@ -27,6 +27,9 @@ nd download <alvo> [--pasta DIR] [--max S] [--js]   clica e grava o arquivo que 
 nd download --url URL [--pasta DIR | --saida ARQ]   baixa com a sessão da aba
 nd download                         arquivos da sessão
 nd pdf <arq> [--paisagem]           imprime a aba atual em PDF
+nd atlas [site]                     atlas do site (~/nodriver/sites/<site>.yaml); sem site, lista
+nd atlas --rascunho                 passos desta sessão em YAML, pelo nome, para virar fluxo
+nd run <site> <fluxo> -p k=v... [--desde N] [--ate N] [--confirmado] [--seco] [--tudo]
 nd tabs                             lista as abas (* = atual)
 nd tab <n|trecho>                   escolhe a aba atual
 nd eval '<js>' | -f arq.js          JavaScript na aba atual
@@ -66,6 +69,9 @@ e22 iframe "localhost:8765"
     e27 input[text] "CEP"
 ```
 
+- `nd run` executa os passos de um fluxo do atlas sem LLM; para antes de passo com
+  `confirmar: true` e, se um passo falhar, mostra o erro, o mapa, a rede recente e como retomar.
+  Formato do atlas em [PLANO](docs/PLANO.md#atlas).
 - Perfil padrão: `~/nodriver/profile-edge`. `--perfil temp` usa um perfil descartável.
 - `--oculto`: Edge num desktop Windows oculto, fora da tela e sem roubar o foco.
 - Estado do daemon em `~/.nd/` (`daemon.json`, `daemon.log`); `ND_DIR` muda o diretório.

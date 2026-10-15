@@ -59,6 +59,8 @@ pub struct Alvo {
     pub l: String,
     /// Observação sobre como o alvo foi achado (ref refeita pelo localizador).
     pub nota: Option<String>,
+    /// Nome que acha o elemento de novo por texto (para o histórico e o atlas).
+    pub nm: String,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -143,6 +145,7 @@ async fn resolver(
                 q: inst.quadros[it.q].clone(),
                 l: it.l.clone(),
                 nota: None,
+                nm: info.nm.clone(),
             });
         }
         if js(d, &info.quadro, "achar", json!({ "ref": alvo })).await? == json!(true) {
@@ -152,6 +155,7 @@ async fn resolver(
                 q: info.quadro,
                 l: st["l"].as_str().unwrap_or("").into(),
                 nota: None,
+                nm: info.nm.clone(),
             });
         }
         let v = js_ref(
@@ -173,6 +177,7 @@ async fn resolver(
                 nota: Some(format!(
                     "{alvo} tinha sido recriado pela página; achado pelo papel e nome"
                 )),
+                nm: info.nm.clone(),
             });
         }
         return Err(format!(
@@ -226,6 +231,7 @@ async fn resolver(
                 q: inst.quadros[it.q].clone(),
                 l: it.l.clone(),
                 nota: None,
+                nm: alvo.to_string(),
             });
         }
         let lista: Vec<String> = iguais
@@ -252,6 +258,7 @@ async fn resolver(
                 q: q.clone(),
                 l: v["l"].as_str().unwrap_or("").into(),
                 nota: None,
+                nm: alvo.to_string(),
             });
         }
     }
@@ -436,6 +443,7 @@ async fn escolher(d: &Arc<Daemon>, tab: &Tab, alvo: &Alvo, opcao: &str) -> Resul
                 q: alvo.q.clone(),
                 l: String::new(),
                 nota: None,
+                nm: String::new(),
             };
             notas.extend(clicar(d, tab, &op, false).await?);
             notas.push(format!("escolhido \"{}\"", esc["t"].as_str().unwrap_or("")));
@@ -672,6 +680,9 @@ pub async fn agir(d: &Arc<Daemon>, a: AcaoArgs, acao: Acao) -> R {
             });
         }
     };
+    if let Some(p) = passo(&acao, a.alvo.as_deref(), alvo.as_ref()) {
+        d.historico.lock().unwrap().push(p);
+    }
     let espera = estabilizar(d, &tab, t0, ESPERA_ACAO).await;
 
     let mut out = Vec::new();
@@ -703,6 +714,55 @@ pub async fn agir(d: &Arc<Daemon>, a: AcaoArgs, acao: Acao) -> R {
         out.push(format!("aviso: {av}"));
     }
     Ok(out.join("\n"))
+}
+
+/// A ação como passo de atlas: alvo pelo texto dado ou pelo nome do elemento da ref.
+fn passo(acao: &Acao, dado: Option<&str>, alvo: Option<&Alvo>) -> Option<Value> {
+    let nome = match (dado, alvo) {
+        (Some(t), Some(al)) if eh_ref(t) && !al.nm.is_empty() => al.nm.clone(),
+        (Some(t), _) => t.to_string(),
+        (None, _) => String::new(),
+    };
+    let com = |extra: Value| {
+        let mut m = json!({ "alvo": nome });
+        if let (Value::Object(m), Value::Object(x)) = (&mut m, extra) {
+            m.extend(x);
+        }
+        m
+    };
+    Some(match acao {
+        Acao::Click { js: false } => json!({ "click": nome }),
+        Acao::Click { js: true } => json!({ "click": com(json!({ "js": true })) }),
+        Acao::Fill { valor, teclas } => {
+            let mut x = json!({ "valor": valor });
+            if *teclas {
+                x["teclas"] = json!(true);
+            }
+            json!({ "fill": com(x) })
+        }
+        Acao::Pick { opcao } => json!({ "pick": com(json!({ "opcao": opcao })) }),
+        Acao::Check { marcar: true } => json!({ "check": nome }),
+        Acao::Check { marcar: false } => json!({ "check": com(json!({ "nao": true })) }),
+        Acao::Upload { arquivos } => json!({ "upload": com(json!({ "arquivos": arquivos })) }),
+        Acao::Key { teclas } if nome.is_empty() && teclas.len() == 1 => json!({ "key": teclas[0] }),
+        Acao::Key { teclas } if nome.is_empty() => json!({ "key": { "teclas": teclas } }),
+        Acao::Key { teclas } => json!({ "key": { "teclas": teclas, "em": nome } }),
+        Acao::Download {
+            pasta: None,
+            js: false,
+            ..
+        } => json!({ "download": nome }),
+        Acao::Download { pasta, js, .. } => {
+            let mut x = json!({});
+            if *js {
+                x["js"] = json!(true);
+            }
+            if let Some(p) = pasta {
+                x["pasta"] = json!(p);
+            }
+            json!({ "download": com(x) })
+        }
+    })
 }
 
 /// Abas abertas desde `t0` (pop-up, `target=_blank`), com o número para `nd tab`.

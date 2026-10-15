@@ -310,3 +310,21 @@
   o mapa; o `nd.js` lê `getAttribute('id')`, e o título protege `document.title` do mesmo caso.
 - Conferido em site real: link de PDF do web.archive.org (PDF dentro do iframe da barra do
   arquivo) gravado por `nd download` no Edge com janela.
+
+## 2026-10-15 — fase 6 (atlas + replay)
+
+### Decisões
+
+- `nd run` roda no cliente: lê o YAML, troca os parâmetros e manda cada passo ao daemon como o
+  comando equivalente. O replay usa as mesmas ações, esperas e diffs dos comandos avulsos.
+- YAML por `serde_yaml_ng` (o `serde_yaml` foi descontinuado), convertido para JSON com a ordem
+  das chaves mantida.
+- `{nome}` é trocado só quando `nome` é parâmetro conhecido; `{x}` sem declarar fora de passo
+  `eval` conta como parâmetro esquecido e o fluxo não começa. JavaScript (`{a}` em
+  desestruturação) fica fora dessa busca.
+- O alvo `Alvo` guarda o nome do elemento; o histórico grava o texto dado ou, quando a ação foi
+  por ref, o nome do elemento da ref. `open`, `tab` e `wait` também entram no histórico.
+- Saída do replay: cabeçalho `[n/total]` e até 8 linhas por passo (`--tudo` mostra tudo; `text` e
+  `eval` saem inteiros). `open` no replay não imprime o mapa.
+- Passo com `confirmar` para o replay com saída de sucesso e o comando de retomada; o agente pede
+  o ok ao usuário e roda `--desde N --confirmado`.

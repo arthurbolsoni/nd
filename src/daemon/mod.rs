@@ -45,6 +45,8 @@ pub struct Daemon {
     pub rede: rede::Rede,
     pub paginas: pagina::Paginas,
     pub downloads: baixar::Downloads,
+    /// Passos feitos nesta sessão, no formato do atlas (`nd atlas --rascunho`).
+    pub historico: Mutex<Vec<serde_json::Value>>,
     /// Abas criadas e quando (para a saída das ações).
     criadas: Mutex<Vec<(String, Instant)>>,
     /// Abas com `Network` ligado e eventos sendo acompanhados.
@@ -96,6 +98,7 @@ pub async fn rodar(op: Opcoes) -> Result<(), String> {
         paginas: pagina::Paginas::default(),
         downloads: baixar::Downloads::default(),
         criadas: Mutex::new(Vec::new()),
+        historico: Mutex::new(Vec::new()),
         preparadas: Mutex::new(HashSet::new()),
         fila: tokio::sync::Mutex::new(()),
         parar: Notify::new(),

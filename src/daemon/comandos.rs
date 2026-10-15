@@ -34,6 +34,34 @@ fn args<T: for<'de> Deserialize<'de>>(p: &Pedido) -> Result<T, String> {
 }
 
 pub async fn executar(d: &Arc<Daemon>, p: &Pedido) -> R {
+    let r = executar_cmd(d, p).await;
+    if r.is_ok()
+        && let Some(passo) = passo_simples(p)
+    {
+        d.historico.lock().unwrap().push(passo);
+    }
+    r
+}
+
+/// `open`, `tab` e `wait` como passos de atlas (as ações se registram em `acoes::agir`).
+fn passo_simples(p: &Pedido) -> Option<Value> {
+    let a = &p.args;
+    match p.cmd.as_str() {
+        "open" if a["nova"] == json!(true) => Some(json!({ "open": { "url": a["url"], "nova": true } })),
+        "open" => Some(json!({ "open": a["url"] })),
+        "tab" => Some(json!({ "tab": a["alvo"] })),
+        "wait" => {
+            let mut w = json!({ a["tipo"].as_str()?: a["valor"] });
+            if a["sumir"] == json!(true) {
+                w["sumir"] = json!(true);
+            }
+            Some(json!({ "wait": w }))
+        }
+        _ => None,
+    }
+}
+
+async fn executar_cmd(d: &Arc<Daemon>, p: &Pedido) -> R {
     match p.cmd.as_str() {
         "status" => status(d).await,
         "stop" => {
@@ -93,6 +121,7 @@ pub async fn executar(d: &Arc<Daemon>, p: &Pedido) -> R {
             }
         }
         "pdf" => baixar::pdf(d, args(p)?).await,
+        "historico" => Ok(serde_json::to_string(&*d.historico.lock().unwrap()).unwrap_or_default()),
         "net" => net::net(d, args(p)?).await,
         "cdp" => cdp(d, args(p)?).await,
         "api" => net::api(d, args(p)?).await,

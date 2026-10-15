@@ -25,6 +25,7 @@ impl Nd {
         Command::new(env!("CARGO_BIN_EXE_nd"))
             .args(args)
             .env("ND_DIR", self.dir.path())
+            .env("ND_ATLAS", self.dir.path().join("sites"))
             .output()
             .unwrap()
     }

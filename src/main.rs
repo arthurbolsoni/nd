@@ -1,6 +1,7 @@
 //! `nd`: automação de navegador para o Claude Code. `nd start` sobe um daemon que segura o Edge;
 //! os outros comandos falam com ele e terminam na hora.
 
+mod atlas;
 mod cliente;
 mod daemon;
 mod desktop;
@@ -250,6 +251,36 @@ enum Cmd {
         #[arg(long)]
         saida: Option<PathBuf>,
     },
+    /// Atlas do site (~/nodriver/sites/<site>.yaml); sem site, lista os atlas.
+    Atlas {
+        site: Option<String>,
+        /// Passos feitos nesta sessão, em YAML, para virar fluxo.
+        #[arg(long, conflicts_with = "site")]
+        rascunho: bool,
+    },
+    /// Roda um fluxo do atlas, passo a passo, sem LLM.
+    Run {
+        site: String,
+        fluxo: String,
+        /// Parâmetro do fluxo: -p nome=valor (repetível).
+        #[arg(short = 'p', long = "param")]
+        params: Vec<String>,
+        /// Começa neste passo (1 = primeiro).
+        #[arg(long, default_value_t = 1)]
+        desde: usize,
+        /// Para depois deste passo.
+        #[arg(long)]
+        ate: Option<usize>,
+        /// Executa também os passos marcados com confirmar (o usuário já deu o ok).
+        #[arg(long)]
+        confirmado: bool,
+        /// Só mostra os passos com os parâmetros trocados, sem executar.
+        #[arg(long)]
+        seco: bool,
+        /// Saída inteira de cada passo.
+        #[arg(long)]
+        tudo: bool,
+    },
     /// Comando CDP cru na aba atual (depuração): nd cdp Network.getResponseBody '{"requestId":"1.2"}'
     #[command(hide = true)]
     Cdp { metodo: String, params: Option<String> },
@@ -384,6 +415,27 @@ fn main() -> ExitCode {
             Ok(saida) => comando("pdf", json!({ "saida": saida, "paisagem": paisagem }), LONGO),
             Err(e) => Err(e),
         },
+        Cmd::Atlas { site, rascunho } => atlas::atlas(site.as_deref(), rascunho).map(|s| println!("{s}")),
+        Cmd::Run {
+            site,
+            fluxo,
+            params,
+            desde,
+            ate,
+            confirmado,
+            seco,
+            tudo,
+        } => atlas::run(&atlas::OpRun {
+            site,
+            fluxo,
+            params,
+            desde,
+            ate,
+            confirmado,
+            seco,
+            tudo,
+        })
+        .map(|s| println!("{s}")),
         Cmd::Cdp { metodo, params } => match params
             .as_deref()
             .map(serde_json::from_str::<serde_json::Value>)
