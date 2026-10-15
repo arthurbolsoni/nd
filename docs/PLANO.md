@@ -8,8 +8,8 @@ para armadilhas comuns, atlas por site e replay de fluxos.
 
 | Repo | Visibilidade | Pasta | Conteúdo |
 |---|---|---|---|
-| `arthurbolsoni/nodriver-rs` | público, fork de `ultrafunkamsterdam/nodriver` (AGPL-3.0) | `~/desktop/nodriver-rs` | biblioteca Rust: porte do nodriver |
-| `arthurbolsoni/nd` | privado | `~/desktop/nd` | ferramenta `nd`: daemon, cliente, map, rede, atlas, replay, skill |
+| `arthurbolsoni/nodriver-rs` | público, fork de `ultrafunkamsterdam/nodriver` (AGPL-3.0) | `~/desktop/nd-projeto/nodriver-rs` | biblioteca Rust: porte do nodriver |
+| `arthurbolsoni/nd` | privado | `~/desktop/nd-projeto/nd` | ferramenta `nd`: daemon, cliente, map, rede, atlas, replay, skill |
 
 O `nd` depende da biblioteca por `path = "../nodriver-rs/crates/nodriver"` durante o
 desenvolvimento e por `git = "https://github.com/arthurbolsoni/nodriver-rs"` depois.

@@ -2,8 +2,8 @@
 
 ## 0. Estrutura
 
-- [x] Fork `ultrafunkamsterdam/nodriver` → `arthurbolsoni/nodriver-rs` (público), clone em `~/desktop/nodriver-rs`, remote `upstream`
-- [x] Projeto `nd` em `~/desktop/nd` (Cargo, git)
+- [x] Fork `ultrafunkamsterdam/nodriver` → `arthurbolsoni/nodriver-rs` (público), clone em `~/desktop/nd-projeto/nodriver-rs`, remote `upstream`
+- [x] Projeto `nd` em `~/desktop/nd-projeto/nd` (Cargo, git)
 - [x] Repo privado `arthurbolsoni/nd`
 - [ ] Decidir: desktop oculto como padrão
 - [ ] Decidir: local do atlas (`~/nodriver/sites/` ou dentro de `~/.claude`)
