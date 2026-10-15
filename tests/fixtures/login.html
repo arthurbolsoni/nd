@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="pt-BR">
+<head><meta charset="utf-8"><title>Entrar</title></head>
+<body>
+<main id="area">
+  <h1>Entrar</h1>
+  <form id="form">
+    <label for="usuario">E-mail</label>
+    <input id="usuario" name="email" type="email" autocomplete="username">
+    <label for="senha">Senha</label>
+    <input id="senha" name="pass" type="password" autocomplete="current-password">
+    <button type="submit">Entrar</button>
+  </form>
+  <p id="erro" role="alert"></p>
+</main>
+<script>
+  // ?pre=1 faz o papel do preenchimento do navegador (o perfil temporário não tem senha salva).
+  if (location.search.includes('pre=1')) {
+    document.getElementById('usuario').value = 'ana@exemplo.com';
+    document.getElementById('senha').value = 'segredo123';
+  }
+  document.getElementById('form').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const fd = new URLSearchParams(new FormData(ev.target));
+    const r = await (await fetch('/api/eco?login=1', { method: 'POST', body: fd })).json();
+    if (!document.getElementById('senha').value) {
+      document.getElementById('erro').textContent = 'Senha obrigatória';
+      return;
+    }
+    document.getElementById('area').innerHTML = '<h1>Bem-vinda</h1><p id="ok">logada (' + r.metodo + ')</p>';
+  });
+</script>
+</body>
+</html>

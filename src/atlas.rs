@@ -13,7 +13,7 @@ use crate::estado::{self, Estado};
 /// Ações aceitas num passo (`esperar` é sinônimo de `wait`).
 const ACOES: &[&str] = &[
     "open", "click", "fill", "pick", "check", "upload", "key", "scroll", "wait", "esperar", "download",
-    "eval", "text", "tab", "pdf",
+    "eval", "text", "tab", "pdf", "login",
 ];
 const ESPERA_SCROLL: Duration = Duration::from_secs(600);
 /// Linhas da saída de cada passo no replay (sem `--tudo`).
@@ -422,6 +422,18 @@ fn pedido(p: &Passo, site: &str) -> Result<(String, Value, Duration), String> {
                 LONGO,
             )
         }
+        "login" => {
+            // `login: {}`, `login: Entrar` (botão) ou `{enviar, checar}`.
+            let enviar = match v {
+                Value::String(s) => Value::String(s.clone()),
+                _ => campo(v, "enviar"),
+            };
+            (
+                "login",
+                json!({ "enviar": enviar, "checar": campo(v, "checar"), "sem_diff": false }),
+                LONGO,
+            )
+        }
         "scroll" => {
             // `scroll: 3`, `scroll: fim` ou `{vezes, fim, dentro, subir}`.
             let vezes_de = |x: &Value| -> Result<Option<u64>, String> {
@@ -600,10 +612,16 @@ pub fn run(op: &OpRun) -> Result<String, String> {
         .enumerate()
         .map(|(i, v)| passo(&substituir(v, &params), i + 1))
         .collect::<Result<_, _>>()?;
-    let pedidos: Vec<(String, Value, Duration)> = passos
+    let mut pedidos: Vec<(String, Value, Duration)> = passos
         .iter()
         .map(|p| pedido(p, &site))
         .collect::<Result<_, _>>()?;
+    // Passo `login` sem `checar` usa o `login.checar` do atlas.
+    for (cmd, args, _) in pedidos.iter_mut() {
+        if cmd == "login" && args["checar"].is_null() {
+            args["checar"] = atlas["login"]["checar"].clone();
+        }
+    }
     let total = passos.len();
     let ate = op.ate.unwrap_or(total).min(total);
     let desde = op.desde.max(1);

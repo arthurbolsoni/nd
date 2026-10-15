@@ -520,3 +520,27 @@ Carrossel por `transform` depois de "Próximo":
 - Depois de uma reconexão, as sessões adotadas antigas não voltam; o `Target.setAutoAttach`
   reenviado às abas liga os iframes e workers de novo, com sessões novas.
 
+## 2026-10-15 — login com senha salva
+
+### Decisões
+
+- O `nd` não lê, não imprime e não digita senha: o gerenciador de senhas do Edge preenche o
+  formulário e o `nd login` só envia. O Edge esconde da página a senha que preencheu até um gesto
+  do usuário; o clique do envio é um clique de mouse por CDP, que conta como gesto.
+- Preenchimento conferido por `value` não vazio ou pelo pseudo-seletor `:autofill`
+  (`:-webkit-autofill`), sem devolver o valor ao daemon.
+- Sem preenchimento ao carregar: clique no campo de usuário (depois no de senha), seta para baixo
+  e, só se o campo entrou em `:autofill` (prévia da sugestão), Enter. Sem prévia não há lista
+  aberta, e o Enter enviaria o formulário vazio: vai Escape. A lista de sugestões é interface do
+  navegador, fora do alcance do CDP (o domínio `Autofill` cobre cartão e endereço).
+- Envio pelo botão `submit` do formulário, por um botão com texto de entrar/continuar, pelo
+  `--enviar` ou, sem botão, Enter no campo de senha.
+- Resultado: `--checar` (ou `login.checar` do atlas no `nd run`) ou o campo de senha sumir; senão,
+  aviso de senha recusada, verificação em duas etapas ou captcha.
+- Máscara: campos com `pass`, `senha`, `pwd` ou `secret` no nome viram `••••` no corpo enviado
+  guardado (form, JSON, JSON dentro de campo de form, multipart) e na query da URL. O mapa mostra
+  `••••` sem o tamanho. `fill` em campo de senha não imprime o valor e entra no histórico como
+  `{senha}`. `nd eval` continua podendo ler `input.value`; a skill proíbe.
+- Login em duas etapas (usuário numa tela, senha na outra): o `nd login` age quando aparece o
+  campo de senha; a primeira etapa é um `nd click`.
+

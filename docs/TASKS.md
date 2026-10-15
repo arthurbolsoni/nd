@@ -135,3 +135,15 @@ Commit `051992e` no fork.
   Biblioteca: `Browser::tabs` não esquece mais a sessão de iframe em cache. Testes:
   `crates/nodriver/tests/autoattach.rs` e `tests/rede.rs` (iframe `cep.html`, worker
   `trabalhador.js`)
+
+## 10. Login com senha salva
+
+- [x] `nd login [--enviar] [--checar]`: formulário de login na página, em iframe ou diálogo;
+  usuário/senha preenchidos pelo Edge (`:autofill`, sem ler o valor); sugestão de senha salva
+  pelo teclado só com prévia visível (sem prévia, Escape: não envia formulário vazio); envio por
+  clique real; conferência por `login.checar` ou pelo campo de senha sumir
+- [x] Passo `login` no atlas (com o `login.checar` do atlas)
+- [x] Senha mascarada (`••••`, sem o tamanho) no mapa, nas notas do `fill`, no `nd net`/`nd api`
+  (form, JSON, multipart, query) e no rascunho do atlas (`{senha}`)
+- [x] Testes: `tests/login.rs` (página `login.html`) e unitário de máscara
+- [ ] Conferência com senha salva de verdade no Edge com janela

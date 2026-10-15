@@ -262,7 +262,7 @@ pub fn ler_form(s: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-fn escrever_form(pares: &[(String, String)]) -> String {
+pub fn escrever_form(pares: &[(String, String)]) -> String {
     pares
         .iter()
         .map(|(k, v)| format!("{}={}", codificar(k), codificar(v)))

@@ -115,6 +115,14 @@ async fn executar_cmd(d: &Arc<Daemon>, p: &Pedido) -> R {
             };
             acoes::agir(d, x.base, acao).await
         }
+        "login" => {
+            let x: LoginArgs = args(p)?;
+            let acao = Acao::Login {
+                enviar: x.enviar,
+                checar: x.checar,
+            };
+            acoes::agir(d, x.base, acao).await
+        }
         "wait" => acoes::wait(d, args(p)?).await,
         "download" => {
             let x: DownloadAcaoArgs = args(p)?;
@@ -276,6 +284,14 @@ struct DownloadAcaoArgs {
 
 fn max_download() -> u64 {
     30
+}
+
+#[derive(Deserialize)]
+struct LoginArgs {
+    #[serde(flatten)]
+    base: AcaoArgs,
+    enviar: Option<String>,
+    checar: Option<String>,
 }
 
 #[derive(Deserialize)]

@@ -392,14 +392,21 @@ async fn preencher(
     if atual == valor {
         return Ok(notas);
     }
+    let senha = st["senha"] == json!(true);
     if !atual.is_empty() && so_alfanum(&atual) == so_alfanum(valor) {
-        notas.push(format!("o campo formatou o valor: {atual:?}"));
+        notas.push(if senha {
+            "o campo de senha formatou o valor".into()
+        } else {
+            format!("o campo formatou o valor: {atual:?}")
+        });
         return Ok(notas);
     }
     let st = js(d, &alvo.q, "definir", json!({ "ref": alvo.r, "valor": valor })).await?;
     let atual = st["valor"].as_str().unwrap_or("");
     if atual == valor {
         notas.push("a digitação não pegou; valor definido por JS".into());
+    } else if senha {
+        notas.push("o campo de senha ficou com outro valor".into());
     } else {
         notas.push(format!("o campo ficou com {atual:?}"));
     }
@@ -740,6 +747,10 @@ pub enum Acao {
         max: u64,
         pasta: Option<String>,
     },
+    Login {
+        enviar: Option<String>,
+        checar: Option<String>,
+    },
 }
 
 impl Acao {
@@ -762,6 +773,7 @@ impl Acao {
             Acao::Key { .. } => "teclas em",
             Acao::Download { .. } => "download por",
             Acao::Scroll { .. } => "rolagem dentro de",
+            Acao::Login { .. } => "login",
         }
     }
 }
@@ -799,6 +811,7 @@ pub async fn agir(d: &Arc<Daemon>, a: AcaoArgs, acao: Acao) -> R {
     let notas = match (&acao, &alvo) {
         (Acao::Key { teclas: t }, al) => teclas(d, &tab, al.as_ref(), t).await,
         (Acao::Scroll { subir, vezes, fim }, al) => rolar(d, &tab, al.as_ref(), *subir, *vezes, *fim).await,
+        (Acao::Login { enviar, .. }, _) => logar(d, &tab, &antes, enviar.as_deref()).await,
         (_, None) => Err("informe o alvo (ref ou texto)".into()),
         (Acao::Click { js }, Some(al)) => clicar(d, &tab, al, *js).await,
         (Acao::Fill { valor, teclas }, Some(al)) => preencher(d, &tab, al, valor, *teclas).await,
@@ -860,10 +873,148 @@ pub async fn agir(d: &Arc<Daemon>, a: AcaoArgs, acao: Acao) -> R {
             },
         );
     }
+    if let Acao::Login { checar, .. } = &acao {
+        out.push(resultado_login(d, &tab, checar.as_deref()).await);
+    }
     for av in espera.avisos() {
         out.push(format!("aviso: {av}"));
     }
     Ok(out.join("\n"))
+}
+
+/// Formulário de login achado num quadro.
+struct FormLogin {
+    q: Quadro,
+    v: Value,
+}
+
+async fn achar_login(d: &Arc<Daemon>, tab: &Tab) -> Result<Option<FormLogin>, String> {
+    let aba = tab.target_id();
+    let mut quadros = vec![pagina::principal(d, tab).await?];
+    quadros.extend(d.paginas.quadros_filhos(aba));
+    for q in quadros {
+        let Ok(v) = js_ref(d, aba, &q, "formLogin", json!({})).await else {
+            continue;
+        };
+        if v["achou"] == json!(true) {
+            return Ok(Some(FormLogin { q, v }));
+        }
+    }
+    Ok(None)
+}
+
+fn alvo_em(q: &Quadro, r: &str) -> Alvo {
+    Alvo {
+        r: r.to_string(),
+        q: q.clone(),
+        l: String::new(),
+        nota: None,
+        nm: String::new(),
+    }
+}
+
+/// Login com a senha salva no Edge: o navegador preenche (ao carregar ou pela sugestão escolhida
+/// pelo teclado) e o `nd` só envia. O valor da senha nunca passa pelo daemon.
+async fn logar(
+    d: &Arc<Daemon>,
+    tab: &Tab,
+    inst: &Instantaneo,
+    enviar: Option<&str>,
+) -> Result<Vec<String>, String> {
+    let mut f = achar_login(d, tab).await?.ok_or(
+        "nenhum campo de senha visível; em login de duas etapas, avance o usuário (nd click) e rode nd login de novo",
+    )?;
+    let mut notas = Vec::new();
+    let ok = |v: &Value| v["senhaOk"] == json!(true) && v["usuarioOk"] == json!(true);
+    if ok(&f.v) {
+        notas.push("usuário e senha já preenchidos (pelo Edge ou pela página)".into());
+    } else {
+        // Sugestão do gerenciador de senhas: clicar no campo abre a lista; seta e Enter escolhem
+        // a primeira credencial salva.
+        let campos: Vec<String> = [&f.v["usuario"], &f.v["senha"]]
+            .iter()
+            .filter_map(|x| x.as_str().map(str::to_string))
+            .collect();
+        for r in campos {
+            clicar(d, tab, &alvo_em(&f.q, &r), false).await?;
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            tab.press_key("ArrowDown").await.map_err(e)?;
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            // Com a sugestão destacada, o Edge mostra a prévia e o campo fica `:autofill`. Sem
+            // prévia não há lista aberta, e o Enter enviaria o formulário vazio: Escape.
+            let previa = achar_login(d, tab)
+                .await?
+                .is_some_and(|g| g.v["usuarioAuto"] == json!(true) || g.v["senhaAuto"] == json!(true));
+            tab.press_key(if previa { "Enter" } else { "Escape" })
+                .await
+                .map_err(e)?;
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            if let Some(g) = achar_login(d, tab).await? {
+                f = g;
+            }
+            if ok(&f.v) {
+                break;
+            }
+        }
+        if !ok(&f.v) {
+            let falta = match (f.v["usuarioOk"] == json!(true), f.v["senhaOk"] == json!(true)) {
+                (false, false) => "usuário e senha",
+                (false, true) => "usuário",
+                _ => "senha",
+            };
+            return Err(format!(
+                "o Edge não preencheu {falta}: não há senha salva deste site neste perfil (ou a sugestão não abriu). \
+                 Faça o login uma vez na janela do nd e aceite salvar a senha"
+            ));
+        }
+        notas.push("preenchido pela sugestão de senha salva do Edge".into());
+    }
+    let botao = match enviar {
+        Some(t) => match resolver(d, tab, inst, t, Filtro::Qualquer).await {
+            Ok(al) => Some(al),
+            Err(x) => return Err(x.msg),
+        },
+        None => f.v["botao"].as_str().map(|r| alvo_em(&f.q, r)),
+    };
+    match botao {
+        Some(al) => {
+            notas.extend(clicar(d, tab, &al, false).await?);
+            let descr = if al.l.is_empty() {
+                f.v["descrBotao"].as_str().unwrap_or("").to_string()
+            } else {
+                al.l.clone()
+            };
+            notas.push(format!("enviado por clique em {} {descr}", al.r));
+        }
+        None => {
+            // Sem botão reconhecível: Enter no campo de senha (o clique nele já é o gesto que
+            // libera a senha preenchida pelo navegador).
+            let r = f.v["senha"].as_str().unwrap_or("").to_string();
+            clicar(d, tab, &alvo_em(&f.q, &r), false).await?;
+            tab.press_key("Enter").await.map_err(e)?;
+            notas.push("enviado com Enter no campo de senha".into());
+        }
+    }
+    Ok(notas)
+}
+
+/// Depois do envio: `checar` (JS do atlas) ou, sem ele, se o campo de senha sumiu.
+async fn resultado_login(d: &Arc<Daemon>, tab: &Tab, checar: Option<&str>) -> String {
+    if let Some(c) = checar {
+        return match tab.evaluate(c).await {
+            Ok(Value::Bool(true)) => "login ok (login.checar deu true)".into(),
+            Ok(v) => format!("aviso: login não confirmado: login.checar deu {v}"),
+            Err(x) => format!("aviso: login.checar falhou: {x}"),
+        };
+    }
+    match achar_login(d, tab).await {
+        Ok(None) => "login ok: o campo de senha sumiu".into(),
+        Ok(Some(_)) => {
+            "aviso: o campo de senha continua na página (senha recusada, verificação em duas etapas ou captcha?)"
+                .into()
+        }
+        Err(x) => format!("aviso: não deu para conferir o login: {x}"),
+    }
 }
 
 /// A ação como passo de atlas: alvo pelo texto dado ou pelo nome do elemento da ref.
@@ -881,6 +1032,18 @@ fn passo(acao: &Acao, dado: Option<&str>, alvo: Option<&Alvo>) -> Option<Value> 
         m
     };
     Some(match acao {
+        Acao::Login { enviar, .. } => match enviar {
+            Some(t) => json!({ "login": { "enviar": t } }),
+            None => json!({ "login": {} }),
+        },
+        // Senha digitada não vai para o histórico (nem para o rascunho do atlas).
+        Acao::Fill { teclas, .. } if alvo.is_some_and(|a| a.l.contains("input[password]")) => {
+            let mut x = json!({ "valor": "{senha}" });
+            if *teclas {
+                x["teclas"] = json!(true);
+            }
+            json!({ "fill": com(x) })
+        }
         Acao::Scroll { subir, vezes, fim } => {
             if nome.is_empty() && !*subir {
                 match (fim, vezes) {

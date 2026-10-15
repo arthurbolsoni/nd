@@ -242,7 +242,9 @@
       const t = (el.type || 'text').toLowerCase();
       if (t === 'checkbox' || t === 'radio' || BOTOES.has(t)) return null;
       if (t === 'file') return [...(el.files || [])].map((f) => f.name).join(', ');
-      if (t === 'password') return el.value ? '•'.repeat(Math.min(el.value.length, 8)) : '';
+      // Senha: só se tem valor, sem o tamanho. O Edge esconde da página a senha que ele
+      // preencheu até um gesto do usuário; `:autofill` mostra que ela está lá.
+      if (t === 'password') return el.value || autopreenchido(el) ? '••••' : '';
       return el.value;
     }
     if (p === 'editor') return norm(el.innerText);
@@ -696,8 +698,55 @@
     const c = campoDe(el);
     const p = papel(el) || 'clicável';
     let v = valor(c, papel(c) || p);
-    if (c.localName === 'input' && c.type === 'password') v = c.value;
-    return { l: descrever(el, p, { foco: focoProfundo() }).l, valor: v, marcado: marcado(el) };
+    // Valor real só para conferir o fill; o daemon não o imprime (`senha`).
+    const senha = c.localName === 'input' && c.type === 'password';
+    if (senha) v = c.value;
+    return { l: descrever(el, p, { foco: focoProfundo() }).l, valor: v, marcado: marcado(el), senha };
+  }
+
+  function autopreenchido(el) {
+    for (const sel of [':autofill', ':-webkit-autofill']) {
+      try {
+        if (el.matches(sel)) return true;
+      } catch { /* seletor desconhecido */ }
+    }
+    return false;
+  }
+
+  const ENVIAR = /^(entrar|login|log in|sign in|signin|acessar|continuar|continue|next|avançar|próximo|prosseguir|ok)$/i;
+
+  // Formulário de login do quadro: o primeiro campo de senha visível, o campo de usuário antes
+  // dele e o botão de envio. Diz se cada campo tem valor (ou foi preenchido pelo navegador) sem
+  // devolver o valor.
+  function formLogin(a) {
+    ajustarProx(a);
+    const vis = (el) => !el.disabled && visivel(el, el.getBoundingClientRect());
+    const senha = todos('input[type=password]').find(vis);
+    if (!senha) return { achou: false, prox };
+    const caixa = senha.form || senha.closest('form, dialog, [role=dialog]') || senha.ownerDocument;
+    const textos = [...caixa.querySelectorAll('input')].filter((el) => {
+      const t = (el.getAttribute('type') || 'text').toLowerCase();
+      return ['text', 'email', 'tel', ''].includes(t) && vis(el);
+    });
+    const antes = textos.filter((el) => el.compareDocumentPosition(senha) & Node.DOCUMENT_POSITION_FOLLOWING);
+    const usuario = antes[antes.length - 1] || null;
+    const botoes = [...caixa.querySelectorAll('button, input[type=submit], input[type=image], [role=button]')].filter(vis);
+    const botao = botoes.find((b) => b.type === 'submit' && b.form === senha.form && senha.form)
+      || botoes.find((b) => ENVIAR.test(norm(b.innerText || b.value || b.getAttribute('aria-label'))))
+      || null;
+    const tem = (el) => !!el && (el.value.length > 0 || autopreenchido(el));
+    return {
+      achou: true,
+      prox,
+      senha: refPara(senha),
+      usuario: usuario && refPara(usuario),
+      botao: botao && refPara(botao),
+      descrBotao: botao ? descrCurta(botao) : null,
+      senhaOk: tem(senha),
+      usuarioOk: !usuario || tem(usuario),
+      senhaAuto: autopreenchido(senha),
+      usuarioAuto: !!usuario && autopreenchido(usuario),
+    };
   }
 
   function melhor(texto, candidatos) {
@@ -918,6 +967,6 @@
     achar: (a) => !!achar(a.ref),
     doc: () => meuDoc,
     mapa, localizar, ponto, caixaQuadro, tipo, preparar, definir, estado, escolher, opcoes,
-    clicarJs, focar, temTexto, api, temSel, porTexto, quieto, rolagem,
+    clicarJs, focar, temTexto, api, temSel, porTexto, quieto, formLogin, rolagem,
   };
 })()

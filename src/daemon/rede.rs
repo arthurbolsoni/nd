@@ -390,7 +390,9 @@ impl Rede {
                             .collect()
                     })
                     .unwrap_or_default();
-                let enviado = req["postData"].as_str().map(|s| cortar_bytes(s, MAX_CORPO).0);
+                let enviado = req["postData"]
+                    .as_str()
+                    .map(|s| cortar_bytes(&mascarar_corpo(s), MAX_CORPO).0);
                 if enviado.is_none() && req["hasPostData"].as_bool() == Some(true) {
                     buscar.push(Buscar::Enviado(id.to_string()));
                 }
@@ -401,7 +403,7 @@ impl Rede {
                     tipo: tipo.to_string(),
                     principal: tipo == "Document" && !iframe,
                     metodo: req["method"].as_str().unwrap_or("GET").to_string(),
-                    url: url.to_string(),
+                    url: mascarar_url(url),
                     status: 0,
                     mime: String::new(),
                     cabecalhos,
@@ -493,7 +495,7 @@ impl Rede {
         let mut ch = self.chamadas.lock().unwrap();
         let Some(c) = ch.achar(aba, id) else { return };
         let antes = c.bytes();
-        c.enviado = Some(cortar_bytes(corpo, MAX_CORPO).0);
+        c.enviado = Some(cortar_bytes(&mascarar_corpo(corpo), MAX_CORPO).0);
         let depois = c.bytes();
         ch.bytes = ch.bytes + depois - antes;
         ch.aparar();
@@ -586,9 +588,157 @@ impl Rede {
     }
 }
 
+/// O que entra no lugar de uma senha no buffer.
+pub const MASCARA: &str = "••••";
+
+/// Campo que guarda senha (form, JSON, multipart, query): `pass`, `encpass`, `password`, `senha`,
+/// `pwd`, `secret`.
+fn campo_de_senha(k: &str) -> bool {
+    let k = k.to_ascii_lowercase();
+    ["pass", "senha", "pwd", "secret"].iter().any(|x| k.contains(x))
+}
+
+fn mascarar_json(v: &mut serde_json::Value) -> bool {
+    use serde_json::Value;
+    match v {
+        Value::Object(m) => {
+            let mut mudou = false;
+            for (k, x) in m.iter_mut() {
+                if campo_de_senha(k) && !x.is_null() {
+                    *x = Value::String(MASCARA.into());
+                    mudou = true;
+                } else {
+                    mudou |= mascarar_json(x);
+                }
+            }
+            mudou
+        }
+        Value::Array(a) => a.iter_mut().fold(false, |m, x| mascarar_json(x) | m),
+        _ => false,
+    }
+}
+
+/// Corpo enviado com as senhas trocadas por `MASCARA`: a senha que o navegador preencheu não
+/// aparece no `nd net --corpo` (nem é refeita pelo `nd api`).
+pub fn mascarar_corpo(corpo: &str) -> String {
+    let t = corpo.trim_start();
+    if (t.starts_with('{') || t.starts_with('['))
+        && let Ok(mut v) = serde_json::from_str::<serde_json::Value>(corpo)
+    {
+        return if mascarar_json(&mut v) {
+            v.to_string()
+        } else {
+            corpo.to_string()
+        };
+    }
+    if corpo.contains("form-data; name=") {
+        return mascarar_multipart(corpo);
+    }
+    if !corpo.contains('=') || corpo.contains('\n') {
+        return corpo.to_string();
+    }
+    let mut pares = super::net::ler_form(corpo);
+    let mut mudou = false;
+    for (k, v) in pares.iter_mut() {
+        if campo_de_senha(k) && !v.is_empty() {
+            *v = MASCARA.into();
+            mudou = true;
+        } else if let Ok(mut j) = serde_json::from_str::<serde_json::Value>(v)
+            && mascarar_json(&mut j)
+        {
+            *v = j.to_string();
+            mudou = true;
+        }
+    }
+    if mudou {
+        super::net::escrever_form(&pares)
+    } else {
+        corpo.to_string()
+    }
+}
+
+fn mascarar_multipart(corpo: &str) -> String {
+    let mut out = String::with_capacity(corpo.len());
+    let mut resto = corpo;
+    while let Some(i) = resto.find("form-data; name=\"") {
+        let ini_nome = i + "form-data; name=\"".len();
+        let Some(fim_nome) = resto[ini_nome..].find('"') else {
+            break;
+        };
+        let nome = &resto[ini_nome..ini_nome + fim_nome];
+        let Some(ini_valor) = resto[ini_nome..].find("\r\n\r\n").map(|x| ini_nome + x + 4) else {
+            break;
+        };
+        let fim_valor = resto[ini_valor..]
+            .find("\r\n--")
+            .map_or(resto.len(), |x| ini_valor + x);
+        out.push_str(&resto[..ini_valor]);
+        out.push_str(if campo_de_senha(nome) {
+            MASCARA
+        } else {
+            &resto[ini_valor..fim_valor]
+        });
+        resto = &resto[fim_valor..];
+    }
+    out.push_str(resto);
+    out
+}
+
+/// URL com os parâmetros de senha da query trocados por `MASCARA`.
+pub fn mascarar_url(url: &str) -> String {
+    let Some((base, q)) = url.split_once('?') else {
+        return url.to_string();
+    };
+    let (q, frag) = q.split_once('#').map_or((q, None), |(a, b)| (a, Some(b)));
+    if !q
+        .split('&')
+        .any(|p| campo_de_senha(p.split('=').next().unwrap_or("")))
+    {
+        return url.to_string();
+    }
+    let partes: Vec<String> = q
+        .split('&')
+        .map(|p| match p.split_once('=') {
+            Some((k, _)) if campo_de_senha(k) => format!("{k}={MASCARA}"),
+            _ => p.to_string(),
+        })
+        .collect();
+    let mut u = format!("{base}?{}", partes.join("&"));
+    if let Some(f) = frag {
+        u.push('#');
+        u.push_str(f);
+    }
+    u
+}
+
 #[cfg(test)]
 mod testes {
-    use super::{cortar_bytes, ruido, site_de};
+    use super::{cortar_bytes, mascarar_corpo, mascarar_url, ruido, site_de};
+
+    #[test]
+    fn senhas_mascaradas() {
+        assert_eq!(
+            mascarar_corpo("email=a%40b.com&pass=segredo&lsd=x"),
+            "email=a%40b.com&pass=%E2%80%A2%E2%80%A2%E2%80%A2%E2%80%A2&lsd=x"
+        );
+        assert_eq!(
+            mascarar_corpo(r#"{"user":{"login":"a","password":"segredo"},"n":1}"#),
+            r#"{"user":{"login":"a","password":"••••"},"n":1}"#
+        );
+        assert_eq!(mascarar_corpo("a=1&b=2"), "a=1&b=2");
+        assert_eq!(mascarar_corpo("texto qualquer"), "texto qualquer");
+        let mp = "--x\r\nContent-Disposition: form-data; name=\"senha\"\r\n\r\nsegredo\r\n--x\r\nContent-Disposition: form-data; name=\"u\"\r\n\r\nana\r\n--x--";
+        let m = mascarar_corpo(mp);
+        assert!(
+            !m.contains("segredo") && m.contains("ana") && m.contains("••••"),
+            "{m}"
+        );
+        assert_eq!(
+            mascarar_url("https://a.com/l?u=a&pwd=x#f"),
+            "https://a.com/l?u=a&pwd=••••#f"
+        );
+        assert_eq!(mascarar_url("https://a.com/l?q=1"), "https://a.com/l?q=1");
+    }
 
     #[test]
     fn ruido_por_host() {

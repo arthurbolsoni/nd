@@ -20,6 +20,7 @@ nd check <alvo> [--nao]             checkbox, radio, switch
 nd upload <alvo> <arquivo>...       input de arquivo ou botão que abre o seletor
 nd key <tecla>... [--em ALVO]       Enter, Tab, Escape, Control+a, Shift+Tab...
 nd scroll [--subir] [--vezes N] [--fim] [--dentro ALVO]   rola (gesto de rolagem) e mostra o que carregou
+nd login [--enviar ALVO] [--checar JS]   login com a senha salva no Edge (o nd não vê a senha)
 nd wait text|sel|url|net <valor> [--sumir] [--max S]
 nd net [filtro] [--novas] [--antigas] [--todas] [--ultimas N]
 nd net --corpo N [--caminho a.b[].c] [--max N] [--saida ARQ]
@@ -46,6 +47,11 @@ nd stop
   avisos, diálogos aceitos, ou `página nova` com o mapa. `--sem-diff` não lê a página depois.
 - O mapa inclui o que a rolagem (da página ou de uma área com rolagem própria) deixou fora da
   tela; depois de `nd scroll`, o diff lista só o que carregou.
+- `nd login` acha o formulário de login (página, iframes, diálogos), confere se o Edge preencheu
+  usuário e senha (pelo `:autofill`, sem ler o valor), tenta a sugestão de senha salva pelo
+  teclado quando não preencheu, envia com clique real e confere: `--checar` (o `login.checar` do
+  atlas) ou o campo de senha sumir. Sem senha salva, para sem enviar. Senhas saem mascaradas
+  (`••••`) no mapa, no `nd net`/`nd api` (form, JSON, multipart, query) e no rascunho do atlas.
 - `nd scroll` rola ~0,9 tela por vez com o gesto de rolagem do navegador (como a roda do mouse),
   espera a página assentar a cada vez e mostra a rede e os itens novos. `--fim` segue até a página
   parar de crescer (limite de 30 rolagens; `--vezes` muda). `--dentro` rola a área com rolagem

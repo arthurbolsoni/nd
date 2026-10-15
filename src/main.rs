@@ -155,6 +155,18 @@ enum Cmd {
         #[command(flatten)]
         acao: OpAcao,
     },
+    /// Login com a senha salva no Edge: o navegador preenche, o nd só envia (a senha não passa
+    /// pelo nd). Sem senha salva, pede o login manual na janela.
+    Login {
+        /// Botão de envio (ref ou texto), se não for o do formulário.
+        #[arg(long)]
+        enviar: Option<String>,
+        /// JavaScript que dá true quando logado (o login.checar do atlas).
+        #[arg(long)]
+        checar: Option<String>,
+        #[command(flatten)]
+        acao: OpAcao,
+    },
     /// Rola a página (gesto de rolagem, como a roda do mouse) e mostra o que carregou.
     Scroll {
         /// Rola para cima.
@@ -380,6 +392,11 @@ fn main() -> ExitCode {
             "scroll",
             json!({ "alvo": dentro, "subir": subir, "vezes": vezes, "fim": fim, "sem_diff": acao.sem_diff }),
             ESPERA_SCROLL,
+        ),
+        Cmd::Login { enviar, checar, acao } => comando(
+            "login",
+            json!({ "enviar": enviar, "checar": checar, "sem_diff": acao.sem_diff }),
+            LONGO,
         ),
         Cmd::Key { teclas, em, acao } => comando(
             "key",
