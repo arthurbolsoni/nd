@@ -77,6 +77,11 @@ async fn mapa_e_acoes() {
     nd.ok(&["check", "Aceito os termos"]);
     tem(&nd.ok(&["pick", "Cidade", "Santos"]), "escolhido \"Santos\"");
     tem(&nd.ok(&["pick", "Escolha a cor", "verde"]), "escolhido \"Verde\"");
+    // Lista virtualizada: "Brasil" só é desenhada depois de digitar na busca dela.
+    let s = nd.ok(&["pick", "Selecione o país", "Brasil"]);
+    tem(&s, "digitado na busca da lista");
+    tem(&s, "escolhido \"Brasil\"");
+    assert_eq!(nd.ok(&["text", "--sel", "#paisbtn"]).trim(), "Brasil");
     let s = nd.ok(&["click", "Salvar"]);
     tem(&s, "texto novo:");
     tem(

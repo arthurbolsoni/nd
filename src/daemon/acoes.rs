@@ -9,6 +9,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::Daemon;
+use super::baixar;
 use super::comandos::aba_atual;
 use super::pagina::{self, Instantaneo, OpFormato, OpMapa, Quadro, estabilizar, js, js_ref};
 
@@ -304,7 +305,7 @@ async fn ponto(d: &Arc<Daemon>, tab: &Tab, alvo: &Alvo) -> Result<Ponto, String>
 }
 
 /// Clique de mouse (CDP) no elemento; sem caixa visível, `el.click()`.
-async fn clicar(d: &Arc<Daemon>, tab: &Tab, alvo: &Alvo, via_js: bool) -> Result<Vec<String>, String> {
+pub async fn clicar(d: &Arc<Daemon>, tab: &Tab, alvo: &Alvo, via_js: bool) -> Result<Vec<String>, String> {
     if via_js {
         js(d, &alvo.q, "clicarJs", json!({ "ref": alvo.r })).await?;
         return Ok(vec!["clique via JS (el.click())".into()]);
@@ -411,8 +412,24 @@ async fn escolher(d: &Arc<Daemon>, tab: &Tab, alvo: &Alvo, opcao: &str) -> Resul
     }
     let fim = Instant::now() + ESPERA_OPCOES;
     let mut visiveis: Vec<String>;
+    let mut buscou = tipo == "texto" || tipo == "editor";
     loop {
-        let v = js_ref(d, aba, &alvo.q, "opcoes", json!({ "texto": opcao })).await?;
+        let v = js_ref(
+            d,
+            aba,
+            &alvo.q,
+            "opcoes",
+            json!({ "texto": opcao, "ref": alvo.r }),
+        )
+        .await?;
+        if !buscou && v["busca"] == json!(true) && v["escolhida"].is_null() {
+            // A lista abriu com um campo de busca focado; digitar filtra (e desenha) a opção.
+            tab.insert_text(opcao).await.map_err(e)?;
+            notas.push("digitado na busca da lista".into());
+            buscou = true;
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            continue;
+        }
         if let Some(esc) = v.get("escolhida").filter(|x| !x.is_null()) {
             let op = Alvo {
                 r: esc["r"].as_str().unwrap_or("").into(),
@@ -551,12 +568,30 @@ async fn teclas(
 }
 
 pub enum Acao {
-    Click { js: bool },
-    Fill { valor: String, teclas: bool },
-    Pick { opcao: String },
-    Check { marcar: bool },
-    Upload { arquivos: Vec<String> },
-    Key { teclas: Vec<String> },
+    Click {
+        js: bool,
+    },
+    Fill {
+        valor: String,
+        teclas: bool,
+    },
+    Pick {
+        opcao: String,
+    },
+    Check {
+        marcar: bool,
+    },
+    Upload {
+        arquivos: Vec<String>,
+    },
+    Key {
+        teclas: Vec<String>,
+    },
+    Download {
+        js: bool,
+        max: u64,
+        pasta: Option<String>,
+    },
 }
 
 impl Acao {
@@ -577,6 +612,7 @@ impl Acao {
             Acao::Check { marcar: false } => "desmarcado",
             Acao::Upload { .. } => "arquivo(s) em",
             Acao::Key { .. } => "teclas em",
+            Acao::Download { .. } => "download por",
         }
     }
 }
@@ -619,6 +655,10 @@ pub async fn agir(d: &Arc<Daemon>, a: AcaoArgs, acao: Acao) -> R {
         (Acao::Pick { opcao }, Some(al)) => escolher(d, &tab, al, opcao).await,
         (Acao::Check { marcar: m }, Some(al)) => marcar(d, &tab, al, *m).await,
         (Acao::Upload { arquivos }, Some(al)) => enviar_arquivos(d, &tab, al, arquivos).await,
+        (Acao::Download { js, max, pasta }, Some(al)) => {
+            let max = Duration::from_secs(*max);
+            baixar::clicar_e_baixar(d, &tab, al, *js, max, pasta.as_deref()).await
+        }
     };
     let notas = match notas {
         Ok(n) => n,
@@ -643,6 +683,10 @@ pub async fn agir(d: &Arc<Daemon>, a: AcaoArgs, acao: Acao) -> R {
     }
     out.extend(notas);
     out.extend(d.paginas.tirar_dialogos(&aba));
+    if !matches!(acao, Acao::Download { .. }) {
+        out.extend(baixar::resumo(d, t0, baixar::ESPERA_DOWNLOAD).await);
+    }
+    out.extend(abas_novas(d, t0).await);
     let origem = tab.url().await.unwrap_or_default();
     let origem = origem
         .split_once("://")
@@ -659,6 +703,31 @@ pub async fn agir(d: &Arc<Daemon>, a: AcaoArgs, acao: Acao) -> R {
         out.push(format!("aviso: {av}"));
     }
     Ok(out.join("\n"))
+}
+
+/// Abas abertas desde `t0` (pop-up, `target=_blank`), com o número para `nd tab`.
+async fn abas_novas(d: &Arc<Daemon>, t0: Instant) -> Vec<String> {
+    let novas = d.criadas_desde(t0);
+    if novas.is_empty() {
+        return Vec::new();
+    }
+    let Ok(abas) = super::comandos::paginas(d).await else {
+        return Vec::new();
+    };
+    abas.iter()
+        .enumerate()
+        // A lista de downloads que o Edge abre numa aba (headless) não é da página.
+        .filter(|(_, (id, _, url))| novas.contains(id) && !url.starts_with("edge://"))
+        .map(|(i, (_, titulo, url))| {
+            let url = if url.is_empty() { "(carregando)" } else { url };
+            let titulo = if titulo.is_empty() || url.contains(titulo.as_str()) {
+                String::new()
+            } else {
+                format!("{titulo} — ")
+            };
+            format!("aba nova [{}]: {titulo}{url} (nd tab {})", i + 1, i + 1)
+        })
+        .collect()
 }
 
 #[derive(Deserialize)]

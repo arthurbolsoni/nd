@@ -202,6 +202,8 @@ pub struct Chamada {
     pub cortada: bool,
     /// A resposta é binária (não guardada).
     pub binaria: bool,
+    /// Navegação que o navegador transformou em download.
+    pub download: bool,
     /// Bytes recebidos (`encodedDataLength`).
     pub tamanho: u64,
     pub inicio: Instant,
@@ -385,6 +387,7 @@ impl Rede {
                     resposta: None,
                     cortada: false,
                     binaria: false,
+                    download: false,
                     tamanho: 0,
                     inicio: Instant::now(),
                     fim: None,
@@ -420,7 +423,7 @@ impl Rede {
                 drop(abas);
                 if let Some(c) = self.chamadas.lock().unwrap().achar(alvo, id) {
                     c.fim = Some(Instant::now());
-                    if ev.method == "Network.loadingFailed" {
+                    if ev.method == "Network.loadingFailed" && !c.download {
                         let e = p["errorText"].as_str().unwrap_or("falhou");
                         c.erro = Some(if p["canceled"].as_bool() == Some(true) {
                             format!("cancelada ({e})")
@@ -474,6 +477,21 @@ impl Rede {
     }
 
     /// Roda `f` com as chamadas guardadas (da mais antiga para a mais nova).
+    /// Marca o documento de `url` (o mais recente) como download: o navegador cancela a navegação
+    /// e baixa a resposta.
+    pub fn virou_download(&self, url: &str) {
+        let mut ch = self.chamadas.lock().unwrap();
+        if let Some(c) = ch
+            .lista
+            .iter_mut()
+            .rev()
+            .find(|c| c.tipo == "Document" && c.url == url)
+        {
+            c.download = true;
+            c.erro = None;
+        }
+    }
+
     pub fn com_chamadas<T>(&self, f: impl FnOnce(&VecDeque<Chamada>) -> T) -> T {
         f(&self.chamadas.lock().unwrap().lista)
     }

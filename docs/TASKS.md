@@ -63,9 +63,16 @@ Commit `e6f836a` no fork.
 
 ## 5. Receitas
 
-- [ ] Levantar dos scripts do `~/nodriver`: `iframe_file`, `blobcap`, `formsave`, `fetchsave`, `clickcapture`, `printpdf`, `viaunica`, `live.py`, `*_apply.py`
+- [x] Levantar dos scripts do `~/nodriver`: `iframe_file`, `blobcap`, `formsave`, `fetchsave`, `clickcapture`, `printpdf`, `viaunica`, `live.py`, `*_apply.py` (equivalências em ANOTACOES)
 - [x] Diálogos automáticos (aceitos pelo daemon, aparecem na saída; feito na fase 3)
-- [ ] `download` (blob), `pdf`
+- [x] Downloads sempre ligados (`~/.nd/downloads`), mostrados na saída das ações; navegação que
+  virou download marcada na rede
+- [x] `nd download <alvo>`: download, resposta-arquivo na mesma aba ou em aba nova (GET/POST, pelo
+  `Fetch` no alvo do navegador), blob em aba, blob baixado, blob só na página
+- [x] `nd download --url`, lista; `nd pdf`
+- [x] Abas abertas pela ação na saída (`aba nova [n]`)
+- [x] `pick` em lista virtualizada com campo de busca próprio
+- [x] Testes: `tests/arquivos.rs` (página `arquivos.html`), caso novo em `tests/acoes.rs`
 
 ## 6. Atlas + replay
 

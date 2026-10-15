@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Arquivos</title>
+</head>
+<body>
+<h1>Arquivos</h1>
+<a href="/anexo">Baixar anexo</a>
+<button onclick="window.open('/doc.pdf')">Abrir PDF</button>
+<form method="post" action="/gerar" target="_blank">
+  <input type="hidden" name="id" value="7">
+  <button>Gerar PDF</button>
+</form>
+<button id="blobAba">Blob em aba</button>
+<button id="blobBaixar">Blob baixar</button>
+<button id="blobPagina">Blob na página</button>
+<button id="nada">Não faz nada</button>
+<iframe id="previa" title="Prévia"></iframe>
+<script>
+  const pdf = () => new Blob(['%PDF-1.4 blob\n'], { type: 'application/pdf' });
+  document.getElementById('blobAba').onclick = () => {
+    const u = URL.createObjectURL(pdf());
+    window.open(u);
+    setTimeout(() => URL.revokeObjectURL(u), 100);
+  };
+  document.getElementById('blobBaixar').onclick = () => {
+    const u = URL.createObjectURL(new Blob(['a;b\n1;2\n'], { type: 'text/csv' }));
+    const a = document.createElement('a');
+    a.href = u;
+    a.download = 'tabela.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(u);
+  };
+  document.getElementById('blobPagina').onclick = () => {
+    document.getElementById('previa').src = URL.createObjectURL(new Blob(['ola'], { type: 'text/plain' }));
+  };
+</script>
+</body>
+</html>

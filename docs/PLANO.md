@@ -82,7 +82,8 @@ Partes do `nd`:
 | `nd eval '<js>'` / `nd eval -f arq.js` | JS livre |
 | `nd net [filtro] [--corpo n]` | XHR/fetch capturados |
 | `nd api <n> [--json '{...}']` | refaz chamada capturada via `fetch` na página |
-| `nd download` / `nd pdf <arq>` | download de blob, impressão em PDF |
+| `nd download <alvo> [--pasta]` / `--url` | clica e grava o arquivo gerado; baixa URL com a sessão |
+| `nd pdf <arq>` | impressão da aba em PDF |
 | `nd atlas <site>` | mostra o atlas do site |
 | `nd run <site> <fluxo> -p k=v [--ate N]` | replay de fluxo do atlas |
 
@@ -132,11 +133,15 @@ Levantadas dos scripts do `~/nodriver` (`iframe_file`, `blobcap`, `formsave`, `f
 - `fill`: foco + clique, limpa, `Input.insertText`; se o valor não ficar, setter nativo + eventos
   `input`/`change`; confere o valor lido.
 - `pick`: select nativo direto; combobox = clicar, digitar, esperar a lista, escolher pelo texto;
-  opção inexistente devolve as opções disponíveis.
+  lista que abre com campo de busca focado recebe o texto (lista virtualizada); opção inexistente
+  devolve as opções disponíveis.
 - `upload`: `DOM.setFileInputFiles` (iframe e input escondido).
 - Diálogos `alert`/`confirm` aceitos e registrados no diff.
 - Espera pós-ação: rede ociosa + DOM parado por 300 ms, teto de 10 s.
-- Download de blob e PDF.
+- Downloads sempre ligados, na saída da ação; abas abertas pela ação na saída.
+- `nd download <alvo>`: download, resposta-arquivo na mesma aba ou em aba nova (GET ou POST),
+  blob em aba, blob baixado, blob só na página. `--url` baixa com a sessão da aba.
+- `nd pdf`: `Page.printToPDF` com fundo e tamanho de página do CSS.
 
 ### Atlas
 

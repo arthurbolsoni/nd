@@ -166,6 +166,35 @@ enum Cmd {
         #[arg(long, default_value_t = 15)]
         max: u64,
     },
+    /// Clica e grava o arquivo gerado (download, PDF na mesma aba ou em aba nova, blob); com --url,
+    /// baixa a URL com a sessão da aba; sem nada, lista os arquivos da sessão.
+    Download {
+        /// Elemento que gera o arquivo (ref ou texto).
+        alvo: Option<String>,
+        /// Baixa esta URL com os cookies da aba atual.
+        #[arg(long, conflicts_with = "alvo")]
+        url: Option<String>,
+        /// Pasta onde gravar (padrão ~/.nd/downloads).
+        #[arg(long)]
+        pasta: Option<PathBuf>,
+        /// Arquivo de saída (com --url).
+        #[arg(long, requires = "url")]
+        saida: Option<PathBuf>,
+        /// Segundos de espera pelo arquivo.
+        #[arg(long, default_value_t = 30)]
+        max: u64,
+        /// Usa el.click() em vez do mouse.
+        #[arg(long)]
+        js: bool,
+        #[command(flatten)]
+        acao: OpAcao,
+    },
+    /// Imprime a aba atual em PDF.
+    Pdf {
+        saida: PathBuf,
+        #[arg(long)]
+        paisagem: bool,
+    },
     /// Chamadas XHR/fetch/documento capturadas: uma linha cada, com a forma do JSON.
     Net {
         /// Trecho da URL, método ou nome da operação (GraphQL).
@@ -332,6 +361,27 @@ fn main() -> ExitCode {
                         "corpo": corpo, "caminho": caminho, "max": max, "saida": saida }),
                 LONGO,
             ),
+            Err(e) => Err(e),
+        },
+        Cmd::Download {
+            alvo,
+            url,
+            pasta,
+            saida,
+            max,
+            js,
+            acao,
+        } => match (absoluto(pasta), absoluto(saida)) {
+            (Ok(pasta), Ok(saida)) => comando(
+                "download",
+                json!({ "alvo": alvo, "url": url, "pasta": pasta, "saida": saida, "max": max,
+                        "js": js, "sem_diff": acao.sem_diff }),
+                Duration::from_secs(max + 60),
+            ),
+            (Err(e), _) | (_, Err(e)) => Err(e),
+        },
+        Cmd::Pdf { saida, paisagem } => match absoluto(Some(saida)) {
+            Ok(saida) => comando("pdf", json!({ "saida": saida, "paisagem": paisagem }), LONGO),
             Err(e) => Err(e),
         },
         Cmd::Cdp { metodo, params } => match params

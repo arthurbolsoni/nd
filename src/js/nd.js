@@ -253,7 +253,7 @@
     let l = p === 'input' ? 'input[' + (el.type || 'text').toLowerCase() + ']' : p;
     if (nm) l += ' ' + q(nm);
     else {
-      const dica = el.id || el.getAttribute('data-testid') || el.getAttribute('name');
+      const dica = el.getAttribute('id') || el.getAttribute('data-testid') || el.getAttribute('name');
       if (dica) l += ' #' + corta(dica, 40);
     }
     if (p === 'link' && (op.href || !nm)) {
@@ -281,7 +281,7 @@
     const n = textoIds(el, 'aria-labelledby') || norm(el.getAttribute('aria-label'))
       || norm(el.querySelector(':scope > legend')?.innerText)
       || norm(el.querySelector('h1, h2, h3, h4, [role=heading]')?.innerText)
-      || el.getAttribute('name') || el.id || '';
+      || el.getAttribute('name') || el.getAttribute('id') || '';
     return corta(n, 60);
   }
 
@@ -481,7 +481,7 @@
     const raiz = a.dentro ? exigir(a.dentro) : document.documentElement;
     const { itens, modal } = percorrer(raiz, a);
     const txt = a.texto ? linhasTexto() : undefined;
-    return { itens, modal, prox, doc: meuDoc, url: location.href, titulo: document.title, txt };
+    return { itens, modal, prox, doc: meuDoc, url: location.href, titulo: typeof document.title === 'string' ? document.title : (document.querySelector('title')?.textContent || ''), txt };
   }
 
   // Acha de novo um elemento que o re-render trocou: mesmo papel e nome (e posição entre iguais).
@@ -519,7 +519,7 @@
     const p = papel(el);
     if (p) return descrever(el, p).l;
     const t = corta(norm(el.innerText), 50);
-    return el.localName + (el.id ? '#' + el.id : '') + (t ? ' ' + q(t) : '');
+    return el.localName + (el.getAttribute('id') ? '#' + el.getAttribute('id') : '') + (t ? ' ' + q(t) : '');
   }
 
   // Ponto para o clique, no viewport deste contexto. Testa o centro e outros pontos da caixa com
@@ -692,9 +692,14 @@
       if (t) lista.push({ el, t });
     }
     const i = melhor(a.texto, lista.map((x) => x.t));
+    // Campo de busca da própria lista (focado ao abrir): filtra lista virtualizada.
+    const f = focoProfundo();
+    const busca = !!f && f !== (a.ref ? achar(a.ref) : null)
+      && ((f.localName === 'input' && /^(text|search)$/.test(f.type)) || f.getAttribute('role') === 'searchbox');
     return {
       escolhida: i >= 0 ? { r: refPara(lista[i].el), t: lista[i].t } : null,
       textos: lista.slice(0, 20).map((x) => corta(x.t, 60)),
+      busca,
       prox,
     };
   }
@@ -759,7 +764,7 @@
         const buf = new Uint8Array(await r.arrayBuffer());
         let bin = '';
         for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
-        return { status: r.status, tipo, b64: btoa(bin), tamanho: buf.length, url: r.url };
+        return { status: r.status, tipo, b64: btoa(bin), tamanho: buf.length, url: r.url, disp: r.headers.get('content-disposition') };
       }
       const t = await r.text();
       return { status: r.status, tipo, texto: t.length > a.max ? t.slice(0, a.max) : t, tamanho: t.length, url: r.url };

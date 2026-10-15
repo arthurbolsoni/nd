@@ -32,6 +32,9 @@ pub fn dir() -> PathBuf {
     let d = std::env::var_os("ND_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| home().join(".nd"));
+    // Caminho com `/` e `\` misturados (ND_DIR vindo do Git Bash) faz o Edge com janela falhar
+    // o download; `absolute` normaliza.
+    let d = std::path::absolute(&d).unwrap_or(d);
     let _ = std::fs::create_dir_all(&d);
     d
 }

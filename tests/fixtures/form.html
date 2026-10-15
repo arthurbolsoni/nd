@@ -43,6 +43,12 @@
     <li role="option">Verde</li>
     <li role="option">Vermelho</li>
   </ul>
+  <!-- Lista virtualizada com busca própria (react-dropdown-select): só 5 opções desenhadas. -->
+  <div id="paisbtn" role="button" tabindex="0">Selecione o país</div>
+  <div id="paispop" hidden>
+    <input id="paisbusca" placeholder="Pesquisar">
+    <div id="paislista"></div>
+  </div>
   <textarea id="obs" placeholder="Observações"></textarea>
   <button id="salvar" type="submit">Salvar</button>
 </form>
@@ -134,6 +140,25 @@
   const cores = document.getElementById('cores');
   corbtn.addEventListener('click', () => { cores.hidden = !cores.hidden; corbtn.setAttribute('aria-expanded', String(!cores.hidden)); });
   for (const li of cores.children) li.addEventListener('click', () => { corbtn.textContent = li.textContent; cores.hidden = true; });
+
+  const paises = Array.from({ length: 200 }, (_, i) => (i === 150 ? 'Brasil' : 'País ' + String(i).padStart(3, '0')));
+  const paisbtn = document.getElementById('paisbtn');
+  const paispop = document.getElementById('paispop');
+  const paisbusca = document.getElementById('paisbusca');
+  const paislista = document.getElementById('paislista');
+  const desenharPaises = () => {
+    const f = paisbusca.value.toLowerCase();
+    paislista.replaceChildren(...paises.filter((p) => p.toLowerCase().includes(f)).slice(0, 5).map((p) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.setAttribute('role', 'option');
+      b.textContent = p;
+      b.addEventListener('click', () => { paisbtn.textContent = p; paispop.hidden = true; });
+      return b;
+    }));
+  };
+  paisbtn.addEventListener('click', () => { paispop.hidden = false; paisbusca.value = ''; desenharPaises(); paisbusca.focus(); });
+  paisbusca.addEventListener('input', desenharPaises);
 
   // Re-render: troca o nó do botão por um igual.
   document.getElementById('trocar').addEventListener('click', () => {

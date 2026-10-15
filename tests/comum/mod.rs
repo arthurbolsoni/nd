@@ -59,6 +59,9 @@ impl Drop for Nd {
     }
 }
 
+/// PDF mínimo do servidor de teste.
+pub const PDF: &[u8] = b"%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n";
+
 /// Lê uma requisição HTTP inteira: (método, caminho com query, cabeçalhos em minúsculas, corpo).
 async fn ler_requisicao(s: &mut tokio::net::TcpStream) -> (String, String, Vec<(String, String)>, Vec<u8>) {
     let mut buf = Vec::new();
@@ -101,7 +104,8 @@ async fn ler_requisicao(s: &mut tokio::net::TcpStream) -> (String, String, Vec<(
 
 /// Serve `tests/fixtures` em 127.0.0.1 (a página com iframe de outro site o abre por
 /// `localhost`). APIs: `/api/lenta` (1,5 s), `/api/lista?pagina=N`, `/api/eco` (devolve método,
-/// query, corpo, `x-token` e cookie), `/api/stream` (dois JSON em sequência), `/arquivo.bin`.
+/// query, corpo, `x-token` e cookie), `/api/stream` (dois JSON em sequência), `/arquivo.bin`,
+/// `/doc.pdf`, `/gerar` (POST) e `/anexo` (como anexo).
 pub async fn servir() -> String {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let porta = listener.local_addr().unwrap().port();
@@ -116,6 +120,7 @@ pub async fn servir() -> String {
                 let (metodo, caminho, cab, corpo_req) = ler_requisicao(&mut s).await;
                 let (rota, query) = caminho.split_once('?').unwrap_or((&caminho, ""));
                 let json = "application/json";
+                let mut extra = "";
                 let (status, tipo, corpo): (&str, &str, Vec<u8>) = match rota {
                     "/api/lenta" => {
                         tokio::time::sleep(Duration::from_millis(1500)).await;
@@ -147,13 +152,18 @@ pub async fn servir() -> String {
                     }
                     "/api/stream" => ("200 OK", json, b"{\"a\":1}\n{\"b\":[1,2]}\n".to_vec()),
                     "/arquivo.bin" => ("200 OK", "application/octet-stream", (0u8..=255).collect()),
+                    "/doc.pdf" | "/gerar" => ("200 OK", "application/pdf", PDF.to_vec()),
+                    "/anexo" => {
+                        extra = "Content-Disposition: attachment; filename=\"anexo.pdf\"\r\n";
+                        ("200 OK", "application/pdf", PDF.to_vec())
+                    }
                     _ => match std::fs::read(raiz.join(rota.trim_start_matches('/'))) {
                         Ok(b) => ("200 OK", "text/html; charset=utf-8", b),
                         Err(_) => ("404 Not Found", "text/plain", b"404".to_vec()),
                     },
                 };
                 let cab = format!(
-                    "HTTP/1.1 {status}\r\nContent-Type: {tipo}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    "HTTP/1.1 {status}\r\nContent-Type: {tipo}\r\nContent-Length: {}\r\n{extra}Connection: close\r\n\r\n",
                     corpo.len()
                 );
                 let _ = s.write_all(cab.as_bytes()).await;

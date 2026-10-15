@@ -255,3 +255,58 @@
 
 - A rede de iframe de outro processo (target próprio) não é capturada; só a das abas.
 - Documento em streaming (Facebook) fica "em andamento" no `nd net` até o HTML terminar.
+
+## 2026-10-15 — fase 5 (receitas)
+
+### Scripts do `~/nodriver` e o equivalente no `nd`
+
+| Script | Faz | No `nd` |
+|---|---|---|
+| `iframe_file.py` | arquivo em input dentro de iframe | `nd upload` (iframe do mesmo domínio e de outro, input escondido, botão que abre o seletor) |
+| `blobcap.py`, `blobcap2.py` | clica e captura blob/`window.open`/`a.click` | `nd download <alvo>` |
+| `formsave.py`, `viaunica.py` | envia form por fetch e grava a resposta | `nd download <botão>` (resposta do POST pega pelo `Fetch`) |
+| `fetchsave.py`, `jssave.py` | baixa URL com a sessão da aba | `nd download --url`, `nd api N --saida` |
+| `clickcapture.py` | clica e lista rede e abas novas | saída das ações (`rede (n)`, `aba nova [n]`, `download:`) |
+| `printpdf.py` | aba em PDF | `nd pdf` |
+| `live.py` | ações por JSON (`type`, `click`, `file`, `dump`...) | `fill`, `click`, `upload`, `map`; `clickxy` não entrou (o mapa lê o iframe do reCAPTCHA) |
+| `gh_apply.py` | foco por JS, confere o valor digitado | `fill` confere e define por JS se a digitação não pegou |
+| `lever_apply.py` | local digitado letra a letra | `fill --teclas` |
+| `inhire_apply.py` | dropdown virtualizado com campo "Pesquisar"; idioma muda rótulos e DDI | `pick` digita na busca da lista; `nd start --lang pt-BR` |
+| `deel_apply.py`, `ashby_apply.py` | combobox MUI, Sim/Não com `aria-pressed`, upload que refaz o form | `pick`; estado `[pressionado]` no mapa; diff mostra campos que mudaram |
+| `*.go` / `*.stop` | segura antes de enviar | passo `confirmar` do atlas (fase 6) |
+
+### Decisões
+
+- Downloads ligados no início do daemon: `Browser.setDownloadBehavior` (`allowAndName`, eventos)
+  na pasta `~/.nd/downloads`. O arquivo chega com o guid como nome e é renomeado para o nome
+  sugerido (`nome (2).ext` se já existe). Religado depois de reconexão.
+- A ação espera downloads iniciados por ela até 15 s e mostra `download: <caminho>`; a navegação
+  que virou download aparece na rede como `→ download` (o navegador cancela o documento com
+  `ERR_ABORTED`).
+- `nd download <alvo>` liga `Fetch` no alvo do navegador (sem sessão) só durante o comando, para
+  respostas de documento em qualquer aba, inclusive a aba nova que o clique abre: resposta 2xx que
+  não é HTML e não é anexo tem o corpo gravado (`Fetch.getResponseBody`) e segue. Anexo fica para o
+  download do navegador.
+- Blob: antes do clique, `URL.createObjectURL` ganha um `Proxy` no mundo da página que guarda os
+  blobs num `Map`. Aba nova com URL `blob:` é lida desse `Map` (a página pode já ter revogado a
+  URL), em pedaços de 4 MB. Blob criado sem download nem aba (mostrado num iframe) vira o arquivo
+  depois de 2 s.
+- `nd download --url` usa o `fetch` do `nd api` (mundo isolado, `credentials: include`); nome pelo
+  `Content-Disposition` ou pela URL.
+
+### Achados
+
+- No Edge com janela, download para pasta com `/` e `\` misturados (`ND_DIR` vindo do Git Bash)
+  termina como "Couldn't download - Download error"; no headless funciona. `estado::dir()` passou
+  a normalizar o caminho com `std::path::absolute`.
+- No Edge headless, PDF abre no visualizador (não vira download) e o download comum abre a aba
+  `edge://downloads-hub/`, que fica fora de `aba nova`.
+- `Fetch.enable` no alvo do navegador pega a resposta de documento de todas as abas, inclusive
+  POST com `target=_blank`; o corpo vem pelo `Fetch.getResponseBody` também quando o visualizador
+  de PDF abre.
+- O filtro de evento da biblioteca casa nome exato ou prefixo terminado em ponto: `"Browser."`, não
+  `"Browser.download"`.
+- `<input name="id">` dentro de um form faz `form.id` devolver o input (DOM clobbering) e quebrava
+  o mapa; o `nd.js` lê `getAttribute('id')`, e o título protege `document.title` do mesmo caso.
+- Conferido em site real: link de PDF do web.archive.org (PDF dentro do iframe da barra do
+  arquivo) gravado por `nd download` no Edge com janela.

@@ -23,6 +23,10 @@ nd wait text|sel|url|net <valor> [--sumir] [--max S]
 nd net [filtro] [--novas] [--antigas] [--todas] [--ultimas N]
 nd net --corpo N [--caminho a.b[].c] [--max N] [--saida ARQ]
 nd api N [--json '{...}'] [--set a.b=v]... [--query k=v]... [--caminho ...] [--saida ARQ]
+nd download <alvo> [--pasta DIR] [--max S] [--js]   clica e grava o arquivo que vier
+nd download --url URL [--pasta DIR | --saida ARQ]   baixa com a sessão da aba
+nd download                         arquivos da sessão
+nd pdf <arq> [--paisagem]           imprime a aba atual em PDF
 nd tabs                             lista as abas (* = atual)
 nd tab <n|trecho>                   escolhe a aba atual
 nd eval '<js>' | -f arq.js          JavaScript na aba atual
@@ -41,6 +45,10 @@ nd stop
   `#3 GET 200 /w/rest.php/v1/search/title?q=Recife 1.7 KB 30 ms → {pages: [{id: num, title: str, …} ×10]}`
 - `nd api N` refaz a chamada `#N` por `fetch` dentro da página (cookies e origem do site), com o
   corpo ou a URL alterados.
+- Downloads ficam sempre ligados e vão para `~/.nd/downloads`; a ação que baixa algo mostra
+  `download: <caminho>`. Abas abertas pela ação aparecem como `aba nova [n]`.
+- `nd download <alvo>` clica e grava o arquivo que o clique gerar: download, resposta que abre na
+  mesma aba ou numa aba nova (PDF por GET ou POST) ou blob criado pela página.
 
 Exemplo de mapa:
 

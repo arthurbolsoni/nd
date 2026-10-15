@@ -328,7 +328,7 @@ fn url_curta(url: &str, origem_pagina: &str) -> String {
     cortar(&s, 110)
 }
 
-fn tamanho(b: u64) -> String {
+pub fn tamanho(b: u64) -> String {
     if b < 1024 {
         format!("{b} B")
     } else if b < 1024 * 1024 {
@@ -365,6 +365,10 @@ pub fn linha(c: &Chamada, origem_pagina: &str) -> String {
     }
     if c.em_andamento() {
         l.push_str(&format!(" (em andamento há {})", duracao(c)));
+        return l;
+    }
+    if c.download {
+        l.push_str(" → download");
         return l;
     }
     if c.erro.is_none() {
@@ -822,7 +826,7 @@ pub async fn api(d: &Arc<Daemon>, a: ApiArgs) -> R {
     Ok(out.join("\n"))
 }
 
-fn base64_decodificar(s: &str) -> Option<Vec<u8>> {
+pub fn base64_decodificar(s: &str) -> Option<Vec<u8>> {
     let mut tabela = [255u8; 256];
     for (i, c) in b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
         .iter()
@@ -913,6 +917,7 @@ mod testes {
             resposta: None,
             cortada: false,
             binaria: false,
+            download: false,
             tamanho: 0,
             inicio: Instant::now(),
             fim: None,

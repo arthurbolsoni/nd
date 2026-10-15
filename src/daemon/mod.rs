@@ -2,6 +2,7 @@
 //! 127.0.0.1, um de cada vez.
 
 pub mod acoes;
+pub mod baixar;
 pub mod comandos;
 pub mod net;
 pub mod pagina;
@@ -9,7 +10,7 @@ pub mod rede;
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use axum::Json;
 use axum::extract::State;
@@ -43,6 +44,9 @@ pub struct Daemon {
     pub atual: Mutex<Option<String>>,
     pub rede: rede::Rede,
     pub paginas: pagina::Paginas,
+    pub downloads: baixar::Downloads,
+    /// Abas criadas e quando (para a saída das ações).
+    criadas: Mutex<Vec<(String, Instant)>>,
     /// Abas com `Network` ligado e eventos sendo acompanhados.
     preparadas: Mutex<HashSet<String>>,
     fila: tokio::sync::Mutex<()>,
@@ -90,6 +94,8 @@ pub async fn rodar(op: Opcoes) -> Result<(), String> {
         atual: Mutex::new(None),
         rede: rede::Rede::default(),
         paginas: pagina::Paginas::default(),
+        downloads: baixar::Downloads::default(),
+        criadas: Mutex::new(Vec::new()),
         preparadas: Mutex::new(HashSet::new()),
         fila: tokio::sync::Mutex::new(()),
         parar: Notify::new(),
@@ -97,6 +103,7 @@ pub async fn rodar(op: Opcoes) -> Result<(), String> {
     });
 
     acompanhar_alvos(&d).await;
+    baixar::ligar(&d).await;
     for tab in d.browser.tabs().await.map_err(|e| e.to_string())? {
         preparar_aba(&d, tab.target_id())
             .await
@@ -308,12 +315,14 @@ async fn acompanhar_alvos(d: &Arc<Daemon>) {
                 .or_else(|| ev.params["targetId"].as_str());
             match (ev.method.as_str(), alvo) {
                 ("Target.targetCreated", Some(id)) if info["type"] == "page" => {
+                    d.criadas.lock().unwrap().push((id.to_string(), Instant::now()));
                     if let Err(e) = preparar_aba(&d, id).await {
                         tracing::debug!("aba {id} não preparada: {e}");
                     }
                 }
                 ("Target.targetDestroyed", Some(id)) => {
                     d.preparadas.lock().unwrap().remove(id);
+                    d.criadas.lock().unwrap().retain(|(x, _)| x != id);
                     d.rede.remover(id);
                     d.paginas.remover(id);
                     let mut atual = d.atual.lock().unwrap();
@@ -335,6 +344,7 @@ async fn acompanhar_alvos(d: &Arc<Daemon>) {
             let _ = conn
                 .call("Target.setDiscoverTargets", json!({ "discover": true }), None)
                 .await;
+            baixar::configurar(&conn).await;
             let alvos: Vec<String> = d.preparadas.lock().unwrap().iter().cloned().collect();
             for alvo in alvos {
                 if let Ok(tab) = d.browser.tab(&alvo).await {
@@ -343,6 +353,19 @@ async fn acompanhar_alvos(d: &Arc<Daemon>) {
             }
         }
     });
+}
+
+impl Daemon {
+    /// Abas criadas desde `t0` que ainda estão abertas.
+    pub fn criadas_desde(&self, t0: Instant) -> Vec<String> {
+        self.criadas
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, t)| *t >= t0)
+            .map(|(id, _)| id.clone())
+            .collect()
+    }
 }
 
 /// Encerra o daemon quando o Edge morre (a conexão não volta).

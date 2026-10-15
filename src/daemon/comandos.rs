@@ -9,6 +9,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::acoes::{self, Acao, AcaoArgs};
+use super::baixar;
 use super::net;
 use super::pagina::{self, OpFormato, OpMapa};
 use super::{Daemon, preparar_aba};
@@ -78,6 +79,20 @@ pub async fn executar(d: &Arc<Daemon>, p: &Pedido) -> R {
             acoes::agir(d, x.base, Acao::Key { teclas: x.teclas }).await
         }
         "wait" => acoes::wait(d, args(p)?).await,
+        "download" => {
+            let x: DownloadAcaoArgs = args(p)?;
+            if x.base.alvo.is_some() {
+                let acao = Acao::Download {
+                    js: x.js,
+                    max: x.max,
+                    pasta: x.pasta,
+                };
+                acoes::agir(d, x.base, acao).await
+            } else {
+                baixar::download(d, args(p)?).await
+            }
+        }
+        "pdf" => baixar::pdf(d, args(p)?).await,
         "net" => net::net(d, args(p)?).await,
         "cdp" => cdp(d, args(p)?).await,
         "api" => net::api(d, args(p)?).await,
@@ -126,7 +141,7 @@ async fn status(d: &Arc<Daemon>) -> R {
 }
 
 /// (target id, título, url) das abas, na ordem do navegador.
-async fn paginas(d: &Daemon) -> Result<Vec<(String, String, String)>, String> {
+pub async fn paginas(d: &Daemon) -> Result<Vec<(String, String, String)>, String> {
     Ok(d.browser
         .targets()
         .await
@@ -196,6 +211,21 @@ struct KeyArgs {
     #[serde(flatten)]
     base: AcaoArgs,
     teclas: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct DownloadAcaoArgs {
+    #[serde(flatten)]
+    base: AcaoArgs,
+    #[serde(default)]
+    js: bool,
+    #[serde(default = "max_download")]
+    max: u64,
+    pasta: Option<String>,
+}
+
+fn max_download() -> u64 {
+    30
 }
 
 #[derive(Deserialize)]
