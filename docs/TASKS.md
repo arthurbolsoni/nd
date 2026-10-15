@@ -84,8 +84,9 @@ Commit `e6f836a` no fork.
 
 ## 7. Skill e regra
 
-- [ ] `~/.claude/skills/navegar/SKILL.md`
-- [ ] Linha na seção nodriver do `~/.claude/CLAUDE.md`
+- [x] `~/.claude/skills/navegar/SKILL.md`
+- [x] Linha na seção nodriver do `~/.claude/CLAUDE.md`
+- [x] `nd` no PATH (`cargo install --path .` → `~/.cargo/bin/nd.exe`)
 
 ## 8. Aceitação
 
