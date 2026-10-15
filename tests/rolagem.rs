@@ -1,6 +1,7 @@
 //! `nd scroll` na página `rolagem.html`: rolagem infinita da página (IntersectionObserver +
 //! `/api/lista?pagina=N`), lista com rolagem própria (`--dentro`), `--fim` parando sozinho, limite,
-//! subida, histórico (`nd atlas --rascunho`) e o passo `scroll` no replay.
+//! subida, histórico (`nd atlas --rascunho`), o passo `scroll` no replay e o diff do que sai da
+//! vista sem sair da página (lista com rolagem própria, carrossel).
 
 mod comum;
 
@@ -19,6 +20,14 @@ async fn rolagem_infinita() {
     nd.ok(&["start", "--perfil", "temp", "--headless"]);
     nd.ok(&["open", &format!("{base}/rolagem.html")]);
     assert_eq!(nd.ok(&["eval", CONTAR]).trim(), "10");
+
+    // Carrossel por transform: os cartões que saem da caixa seguem na página, não "sumiram".
+    let s = nd.ok(&["click", "Próximo"]);
+    tem(
+        &s,
+        "fora da vista 3 (seguem na página): e11 \"Cartão 1\"; e12 \"Cartão 2\"; e13 \"Cartão 3\"",
+    );
+    assert!(!s.contains("sumiram"), "{s}");
 
     // Uma rolagem: chega ao sentinela, a página pede a próxima e os anúncios novos saem no diff.
     let s = nd.ok(&["scroll"]);
@@ -54,13 +63,33 @@ async fn rolagem_infinita() {
     tem(&s, "a página está no topo");
     assert_eq!(nd.ok(&["eval", "window.scrollY"]).trim(), "0");
 
-    // Dentro da lista com rolagem própria, pelo texto de um item dela; a página fica parada.
-    let s = nd.ok(&["scroll", "--dentro", "Opção 1", "--fim"]);
+    // Dentro da lista com rolagem própria (perto do topo da página), pelo texto de um item dela;
+    // a página fica parada. As opções que a rolagem leva para cima da área seguem no mapa.
+    let s = nd.ok(&["scroll", "--dentro", "Opção 1"]);
     tem(&s, "área com rolagem:");
-    // Opções que passaram pela área saem como texto novo; as visíveis no fim, como elementos.
-    tem(&s, "texto novo:\n  Opção 11");
-    tem(&s, "button \"Opção 30\"");
+    tem(&s, "nada novo carregou");
+    assert!(!s.contains("sumiram"), "{s}");
+    // Até o fim: as 20 opções carregadas saem como elementos novos, mesmo as que passaram pela
+    // área e ficaram acima dela.
+    let s = nd.ok(&["scroll", "--dentro", "Opção 1", "--fim"]);
+    let novas: Vec<&str> = s
+        .lines()
+        .filter(|l| l.starts_with("+ e") && l.contains("button \"Opção "))
+        .collect();
+    assert_eq!(novas.len(), 20, "{s}");
+    assert!(novas[0].ends_with("button \"Opção 11\""), "{s}");
+    assert!(novas[19].ends_with("button \"Opção 30\""), "{s}");
     tem(&s, "fim: a área parou de crescer");
+    assert!(!s.contains("sumiram"), "{s}");
+    assert!(!s.contains("texto novo"), "{s}");
+    // Opção que ficou acima da área: o clique a traz para a vista.
+    tem(&nd.ok(&["click", "Opção 2"]), "clique em e2 button \"Opção 2\"");
+    let topo: f64 = nd
+        .ok(&["eval", "document.getElementById('painel').scrollTop"])
+        .trim()
+        .parse()
+        .unwrap();
+    assert!(topo < 80.0, "{topo}");
     assert_eq!(
         nd.ok(&["eval", "document.getElementById('painel').children.length"])
             .trim(),

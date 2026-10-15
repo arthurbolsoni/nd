@@ -850,7 +850,15 @@ pub async fn agir(d: &Arc<Daemon>, a: AcaoArgs, acao: Acao) -> R {
     }
     if !a.sem_diff {
         let depois = pagina::instantaneo(d, &tab, &op).await?;
-        out.push(pagina::diferenca(&antes, &depois));
+        let dif = pagina::diferenca(&antes, &depois);
+        // Na rolagem o que está na tela muda sempre; o diff fala do que carregou.
+        out.push(
+            if matches!(acao, Acao::Scroll { .. }) && dif == pagina::SEM_MUDANCA {
+                "nada novo carregou".into()
+            } else {
+                dif
+            },
+        );
     }
     for av in espera.avisos() {
         out.push(format!("aviso: {av}"));

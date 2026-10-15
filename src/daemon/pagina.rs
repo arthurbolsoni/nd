@@ -27,6 +27,8 @@ const MAX_QUADROS: usize = 10;
 const MAX_PROFUNDIDADE: usize = 3;
 /// Linhas de "apareceu" e "mudou" no diff.
 const MAX_DIFF: usize = 60;
+/// Diff sem nada a mostrar.
+pub const SEM_MUDANCA: &str = "sem mudança visível";
 /// Linhas de texto novo no diff.
 const MAX_TEXTO: usize = 12;
 
@@ -339,6 +341,8 @@ struct RespMapa {
     titulo: String,
     #[serde(default)]
     txt: Vec<String>,
+    #[serde(default)]
+    fora: Vec<String>,
 }
 
 pub struct Instantaneo {
@@ -351,6 +355,8 @@ pub struct Instantaneo {
     pub modal: bool,
     /// Linhas do texto visível (de todos os quadros), quando pedidas.
     pub texto: Vec<String>,
+    /// Refs fora do mapa que seguem na página, recortadas por uma área (lidas com o texto).
+    pub fora: HashSet<String>,
 }
 
 #[derive(Default)]
@@ -407,6 +413,7 @@ pub async fn instantaneo(d: &Arc<Daemon>, tab: &Tab, op: &OpMapa) -> R<Instantan
     let mut profundidade = vec![0usize];
     let mut itens = resp.itens;
     let mut texto = resp.txt;
+    let mut fora: HashSet<String> = resp.fora.into_iter().collect();
     let mut modal = resp.modal.is_some();
     let mut iframes = None;
     let mut expandidos: HashSet<String> = HashSet::new();
@@ -446,6 +453,7 @@ pub async fn instantaneo(d: &Arc<Daemon>, tab: &Tab, op: &OpMapa) -> R<Instantan
                 prox = s.prox;
                 modal |= s.modal.is_some();
                 texto.extend(s.txt);
+                fora.extend(s.fora);
                 let idx = quadros.len();
                 d.paginas
                     .com(aba, |ea| ea.pais.insert(filho.clone(), (pai.clone(), r.clone())));
@@ -504,6 +512,7 @@ pub async fn instantaneo(d: &Arc<Daemon>, tab: &Tab, op: &OpMapa) -> R<Instantan
         doc: if eh_raiz { resp.doc } else { doc_antigo },
         modal,
         texto,
+        fora,
     })
 }
 
@@ -658,10 +667,11 @@ pub fn diferenca(antes: &Instantaneo, depois: &Instantaneo) -> String {
     };
     let ra = por_ref(antes);
     let rb = por_ref(depois);
-    // Nó trocado pelo re-render com a mesma descrição não conta como mudança.
+    // Nó trocado pelo re-render com a mesma descrição não conta como mudança. Ref que saiu do mapa
+    // mas segue na página (recortada por uma área) não sumiu.
     let mut sumidas: HashMap<&str, usize> = HashMap::new();
     for (r, i) in &ra {
-        if !rb.contains_key(r) {
+        if !rb.contains_key(r) && !depois.fora.contains(r) {
             *sumidas.entry(antes.itens[*i].l.as_str()).or_default() += 1;
         }
     }
@@ -735,11 +745,21 @@ pub fn diferenca(antes: &Instantaneo, depois: &Instantaneo) -> String {
         }
     }
     let mut foram: Vec<String> = Vec::new();
+    let mut fora: Vec<String> = Vec::new();
     let mut ordem: Vec<(&String, &usize)> = ra.iter().filter(|(r, _)| !rb.contains_key(*r)).collect();
     ordem.sort_by_key(|(_, i)| **i);
     let mut usadas: HashMap<&str, usize> = HashMap::new();
     for (r, i) in ordem {
-        let l = antes.itens[*i].l.as_str();
+        let it = &antes.itens[*i];
+        let l = it.l.as_str();
+        if depois.fora.contains(r) {
+            let nm = it.nm.as_deref().filter(|n| !n.is_empty());
+            fora.push(match nm {
+                Some(n) => format!("{r} \"{}\"", cortar(n, 30)),
+                None => format!("{r} {}", cortar(l, 30)),
+            });
+            continue;
+        }
         if trocadas.contains(l) {
             let c = usadas.entry(l).or_default();
             let total_trocadas = depois
@@ -764,6 +784,19 @@ pub fn diferenca(antes: &Instantaneo, depois: &Instantaneo) -> String {
         };
         out.push(format!("- sumiram {n}: {}{resto}", mostra.join("; ")));
     }
+    if !fora.is_empty() {
+        let n = fora.len();
+        let mostra: Vec<String> = fora.into_iter().take(5).collect();
+        let resto = if n > 5 {
+            format!("; … mais {}", n - 5)
+        } else {
+            String::new()
+        };
+        out.push(format!(
+            "fora da vista {n} (seguem na página): {}{resto}",
+            mostra.join("; ")
+        ));
+    }
     let mut mudou = 0;
     for it in &depois.itens {
         if let Some(r) = &it.r
@@ -780,7 +813,7 @@ pub fn diferenca(antes: &Instantaneo, depois: &Instantaneo) -> String {
         out.push(format!("~ … mais {}", mudou - MAX_DIFF));
     }
     if out.is_empty() {
-        "sem mudança visível".into()
+        SEM_MUDANCA.into()
     } else {
         out.join("\n")
     }
@@ -892,6 +925,7 @@ mod testes {
             doc: "1".into(),
             modal: false,
             texto: texto.iter().map(|s| s.to_string()).collect(),
+            fora: HashSet::new(),
         }
     }
 
@@ -934,6 +968,32 @@ mod testes {
             diferenca(&antes, &depois),
             "+ e4 button \"Ok\"\ntexto novo:\n  Salvo com sucesso\n- sumiram 1: e2 button \"Sair\"\n\
              ~ e3 input \"Nome\" = \"a\""
+        );
+    }
+
+    #[test]
+    fn diff_separa_fora_da_vista_de_sumido() {
+        let antes = inst(
+            vec![
+                item(Some("e1"), "el", 0, "link \"Cartão 1\"", 0),
+                item(Some("e2"), "el", 0, "link \"Cartão 2\"", 0),
+                item(Some("e3"), "el", 0, "button \"Fechar\"", 0),
+            ],
+            &[],
+        );
+        let mut depois = inst(
+            vec![
+                // e1 e e2 recortados pelo carrossel; e3 saiu do DOM; e4 tem a descrição de e1, mas
+                // e1 segue na página: é novo, não re-render.
+                item(Some("e4"), "el", 0, "link \"Cartão 1\"", 0),
+            ],
+            &[],
+        );
+        depois.fora = ["e1", "e2"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(
+            diferenca(&antes, &depois),
+            "+ e4 link \"Cartão 1\"\n- sumiram 1: e3 button \"Fechar\"\n\
+             fora da vista 2 (seguem na página): e1 \"Cartão 1\"; e2 \"Cartão 2\""
         );
     }
 }

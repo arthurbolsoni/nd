@@ -403,7 +403,8 @@ logada pelo usuário antes do teste.
 - Dentro de uma área com rolagem própria perto do topo da página, os itens que passam para cima
   dela ficam com a caixa acima do início do documento, e o mapa os trata como ocultos (a mesma
   regra que esconde menu fora da tela). No diff aparecem em `- sumiram`; os que passaram pela
-  área sem ficar visíveis no fim aparecem em `texto novo:`.
+  área sem ficar visíveis no fim aparecem em `texto novo:`. Corrigido na seção "diff da rolagem
+  dentro de área", abaixo.
 - `Browser.grantPermissions` concede a lista do comando e nega todo o resto: concedendo um tipo
   por vez, só o último ficava. A biblioteca testa cada tipo e concede os aceitos juntos. O Edge
   recusa `smartCard` e `webPrinting`.
@@ -422,3 +423,65 @@ logada pelo usuário antes do teste.
 
 - `nd scroll` no Facebook Marketplace; o atlas `www.facebook.com.yaml` e a armadilha sobre
   rolagem ficaram como estavam.
+
+## 2026-10-15 — diff da rolagem dentro de área
+
+### Causa
+
+- O mapa escondia o elemento com a caixa acima do início do documento (`bottom + scrollY <= 0`),
+  regra feita para menu posicionado fora da tela. Numa área com rolagem própria perto do topo da
+  página, a rolagem da área leva os itens de cima para essa faixa: saíam do mapa e o diff os
+  listava em `- sumiram`. As opções carregadas durante a rolagem e já acima da área no fim não
+  entravam no mapa e só apareciam em `texto novo:` (o `innerText` não recorta pela área).
+- Itens abaixo da área, recortados por ela mas dentro do viewport, já ficavam no mapa. Clicar num
+  deles dava "coberto por" (o `elementFromPoint` cai no que está atrás da área), porque o
+  `rolarSePreciso` só olhava o viewport.
+
+### Decisões
+
+- Visibilidade: elemento à esquerda da tela ou acima do início da página continua oculto, a não
+  ser que volte para a faixa visível somando o `scrollLeft`/`scrollTop` dos ancestrais (shadow DOM
+  atravessado, sem contar `body`/`html`). Item que a rolagem de uma área tirou da vista fica no
+  mapa, como o que a rolagem da página deixa acima da tela. Na rolagem (da área ou da página) e
+  nas outras ações, o diff mostra `+` para o que carregou e nada para o que só mudou de lugar.
+- Diff: ref que saiu do mapa e segue no documento, com caixa, sem CSS que a esconda e fora da
+  caixa de um ancestral com `overflow` diferente de `visible` (carrossel por `transform`) sai numa
+  linha `fora da vista N (seguem na página): eN "nome"; …` (até 5), em vez de `- sumiram`. O
+  `mapa` em modo diff devolve essas refs a partir do registro de `WeakRef`; refs de nós coletados
+  saem do registro nessa hora. Ref fora da vista não entra no casamento de re-render (nó trocado
+  com a mesma descrição).
+- Continuam em `- sumiram`: nó removido do DOM, escondido por CSS (`display: none`,
+  `visibility`, `opacity`, `details` fechado) e elemento movido para fora da tela sem área que o
+  recorte (menu em `left: -9999px`). O diff de modal, re-render e página nova não mudou.
+- `nd scroll` sem nada novo imprime `nada novo carregou` em vez de `sem mudança visível` (na
+  rolagem o que está na tela sempre muda).
+- Clique, foco e preenchimento rolam o elemento para a vista (`scrollIntoView` no centro) também
+  quando ele está fora, mesmo em parte, da caixa de uma área com rolagem própria
+  (`overflow` `auto`/`scroll`/`overlay` e conteúdo maior que a caixa). Área com `overflow: hidden`
+  não é rolada pelo `nd` (carrossel controlado pela página).
+
+### Saída na página de teste
+
+Antes, `nd scroll --dentro "Opção 1" --fim` na lista de 10 opções que carrega mais 10 no fim:
+
+```
++ e12 button "Opção 24"
+…
++ e18 button "Opção 30"
+texto novo:
+  Opção 11
+  …
+  … mais 1 linhas (nd text)
+- sumiram 7: e4 button "Opção 4"; …; e10 button "Opção 10"
+```
+
+Depois:
+
+```
++ e19 button "Opção 11"
+…
++ e38 button "Opção 30"
+```
+
+Carrossel por `transform` depois de "Próximo":
+`fora da vista 3 (seguem na página): e11 "Cartão 1"; e12 "Cartão 2"; e13 "Cartão 3"`.

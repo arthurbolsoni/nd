@@ -124,3 +124,8 @@ Commit `051992e` no fork.
 - [x] Passo `scroll` no atlas: `scroll: 3`, `scroll: fim`, `{vezes, fim, dentro, subir}`
 - [x] Testes: `tests/rolagem.rs` (página `rolagem.html`: rolagem infinita com
   `/api/lista?pagina=N`, lista com rolagem própria, `--fim`, limite, subida, rascunho e replay)
+- [x] Diff da rolagem dentro de área perto do topo da página: itens levados para cima pela rolagem
+  da área seguem no mapa (sem `- sumiram`), opções carregadas saem como `+`; ref que segue na
+  página recortada por uma área (carrossel) sai em `fora da vista N (seguem na página)`; clique
+  em item recortado pela área rola para a vista; `nada novo carregou` no `nd scroll` sem novidade.
+  Teste em `tests/rolagem.rs` (lista com rolagem própria e carrossel em `rolagem.html`)

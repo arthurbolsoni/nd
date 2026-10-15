@@ -41,8 +41,11 @@ nd stop
 
 - Alvo: ref do mapa (`e12`) ou texto (nome do elemento: rótulo, texto, aria-label,
   placeholder). Texto que bate com mais de um elemento dá erro com a lista de refs.
-- Ações imprimem o que mudou: `+` elemento novo, `-` sumiu, `~` mudou, `texto novo:`, avisos,
-  diálogos aceitos, ou `página nova` com o mapa. `--sem-diff` não lê a página depois.
+- Ações imprimem o que mudou: `+` elemento novo, `-` sumiu (saiu do DOM ou foi escondido), `~`
+  mudou, `fora da vista N` (segue na página, recortado por uma área como carrossel), `texto novo:`,
+  avisos, diálogos aceitos, ou `página nova` com o mapa. `--sem-diff` não lê a página depois.
+- O mapa inclui o que a rolagem (da página ou de uma área com rolagem própria) deixou fora da
+  tela; depois de `nd scroll`, o diff lista só o que carregou.
 - `nd scroll` rola ~0,9 tela por vez com o gesto de rolagem do navegador (como a roda do mouse),
   espera a página assentar a cada vez e mostra a rede e os itens novos. `--fim` segue até a página
   parar de crescer (limite de 30 rolagens; `--vezes` muda). `--dentro` rola a área com rolagem

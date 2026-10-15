@@ -89,8 +89,9 @@ Partes do `nd`:
 | `nd atlas <site>` | mostra o atlas do site |
 | `nd run <site> <fluxo> -p k=v [--ate N]` | replay de fluxo do atlas |
 
-Ação que muda a página devolve um diff: URL nova, elementos que apareceram ou sumiram, toast ou
-erro visível.
+Ação que muda a página devolve um diff: URL nova, elementos que apareceram ou sumiram (saíram do
+DOM ou foram escondidos), elementos que saíram da vista e seguem na página (recortados por uma
+área, como carrossel; uma linha `fora da vista N`), toast ou erro visível.
 
 ### Snapshot (`nd map`)
 
@@ -100,7 +101,8 @@ erro visível.
   obrigatório.
 - Formulários agrupados, títulos h1–h3 como âncora.
 - Shadow DOM aberto; iframe do mesmo domínio por JS, de outro domínio pelo target CDP do frame.
-- Padrão: viewport e entorno. `--tudo`: página inteira. Corte em ~300 linhas com indicação do
+- Padrão: viewport e entorno, inclusive o que a rolagem de uma área própria (lista, painel) deixou
+  fora da caixa dela. `--tudo`: página inteira. Corte em ~300 linhas com indicação do
   restante.
 
 ```

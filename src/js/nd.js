@@ -60,13 +60,53 @@
     return { x, y };
   }
 
+  // Ancestral seguinte, atravessando shadow DOM; null no body/html (a rolagem da página é à parte).
+  function acima(x) {
+    const a = x.parentElement || x.getRootNode().host;
+    if (!a) return null;
+    const d = a.ownerDocument;
+    return a === d.body || a === d.documentElement ? null : a;
+  }
+
+  // Quanto a rolagem das áreas com rolagem própria em volta de `el` levou o conteúdo para a
+  // esquerda e para cima.
+  function rolagemDasAreas(el) {
+    let x = 0, y = 0;
+    for (let a = acima(el); a; a = acima(a)) {
+      x += a.scrollLeft;
+      y += a.scrollTop;
+    }
+    return { x, y };
+  }
+
+  // Elemento à esquerda da tela ou acima do início da página fica oculto (menu escondido fora da
+  // tela), a não ser que tenha ido para lá pela rolagem de uma área própria (lista, painel): aí
+  // continua no mapa, como o que a rolagem da página deixa acima da tela.
   function visivel(el, r) {
     if (r.width < 1 || r.height < 1) return false;
     if (!el.checkVisibility({ opacityProperty: true, visibilityProperty: true })) return false;
     const w = janela(el);
-    if (r.right <= 0 || r.left >= w.innerWidth) return false;
-    if (r.bottom + w.scrollY <= 0) return false;
+    if (r.left >= w.innerWidth) return false;
+    if (r.right <= 0 || r.bottom + w.scrollY <= 0) {
+      const s = rolagemDasAreas(el);
+      if (r.right + s.x <= 0 || r.bottom + w.scrollY + s.y <= 0) return false;
+    }
     return true;
+  }
+
+  // Tem caixa, não está escondido por CSS e ficou fora da caixa de um ancestral que recorta o
+  // conteúdo (overflow): saiu da vista dentro de uma área (carrossel, lista), não da página.
+  function recortadoPorArea(el) {
+    const b = el.getBoundingClientRect();
+    if (b.width < 1 || b.height < 1) return false;
+    if (!el.checkVisibility({ opacityProperty: true, visibilityProperty: true })) return false;
+    for (let a = acima(el); a; a = acima(a)) {
+      const cs = estilo(a);
+      if (cs.overflowX === 'visible' && cs.overflowY === 'visible') continue;
+      const c = a.getBoundingClientRect();
+      if (b.right <= c.left || b.left >= c.right || b.bottom <= c.top || b.top >= c.bottom) return true;
+    }
+    return false;
   }
 
   function focoProfundo() {
@@ -476,12 +516,26 @@
     return [...vistas];
   }
 
+  // Refs dadas antes que ficaram fora do mapa mas seguem no documento, recortadas por uma área
+  // (carrossel por transform, por exemplo). Limpa do registro as refs de elementos já coletados.
+  function foraDaVista(itens) {
+    const listados = new Set(itens.map((it) => it.r).filter(Boolean));
+    const fora = [];
+    for (const [r, wr] of reg) {
+      const el = wr.deref();
+      if (!el) reg.delete(r);
+      else if (!listados.has(r) && el.isConnected && recortadoPorArea(el)) fora.push(r);
+    }
+    return fora;
+  }
+
   function mapa(a) {
     ajustarProx(a);
     const raiz = a.dentro ? exigir(a.dentro) : document.documentElement;
     const { itens, modal } = percorrer(raiz, a);
     const txt = a.texto ? linhasTexto() : undefined;
-    return { itens, modal, prox, doc: meuDoc, url: location.href, titulo: typeof document.title === 'string' ? document.title : (document.querySelector('title')?.textContent || ''), txt };
+    const fora = a.texto && !a.dentro ? foraDaVista(itens) : undefined;
+    return { itens, modal, prox, doc: meuDoc, url: location.href, titulo: typeof document.title === 'string' ? document.title : (document.querySelector('title')?.textContent || ''), txt, fora };
   }
 
   // Acha de novo um elemento que o re-render trocou: mesmo papel e nome (e posição entre iguais).
@@ -498,10 +552,22 @@
     return { achou: true, l: itens[i].l, prox, doc: meuDoc };
   }
 
+  // Fora (mesmo em parte) da caixa de uma área com rolagem própria em volta dele.
+  function foraDaArea(el, b) {
+    for (let a = acima(el); a; a = acima(a)) {
+      if (a.scrollHeight <= a.clientHeight + 1 && a.scrollWidth <= a.clientWidth + 1) continue;
+      const cs = estilo(a);
+      if (!/(auto|scroll|overlay)/.test(cs.overflowY + ' ' + cs.overflowX)) continue;
+      const c = a.getBoundingClientRect();
+      if (b.top < c.top - 1 || b.left < c.left - 1 || b.bottom > c.bottom + 1 || b.right > c.right + 1) return true;
+    }
+    return false;
+  }
+
   function rolarSePreciso(el) {
     const b = el.getBoundingClientRect();
     const w = janela(el);
-    if (b.top < 0 || b.left < 0 || b.bottom > w.innerHeight || b.right > w.innerWidth) {
+    if (b.top < 0 || b.left < 0 || b.bottom > w.innerHeight || b.right > w.innerWidth || foraDaArea(el, b)) {
       el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
     }
   }

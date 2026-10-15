@@ -10,12 +10,21 @@
   #painel button { display: block; height: 40px; width: 100%; }
   /* 10 anúncios ocupam 0,9 tela: a primeira rolagem já mostra o sentinela. */
   .anuncio { display: block; height: 9vh; border-bottom: 1px solid #ccc; box-sizing: border-box; }
+  /* Carrossel por transform: "Próximo" leva os cartões 1–3 para a esquerda, fora da caixa. */
+  #carrossel { width: 300px; overflow: hidden; margin: 8px 0; }
+  #trilho { display: flex; }
+  #trilho a { flex: 0 0 100px; }
 </style>
 </head>
 <body>
   <h1>Anúncios</h1>
   <!-- Lista com rolagem própria: carrega mais 10 opções ao chegar no fim dela (até 30). -->
   <div id="painel"></div>
+  <div id="carrossel"><div id="trilho">
+    <a href="/cartao/1">Cartão 1</a><a href="/cartao/2">Cartão 2</a><a href="/cartao/3">Cartão 3</a>
+    <a href="/cartao/4">Cartão 4</a><a href="/cartao/5">Cartão 5</a><a href="/cartao/6">Cartão 6</a>
+  </div></div>
+  <button type="button" onclick="document.getElementById('trilho').style.transform = 'translateX(-300px)'">Próximo</button>
   <!-- Rolagem infinita da página: cada página vem de /api/lista quando o sentinela aparece (até 4). -->
   <div id="lista"></div>
   <div id="sentinela">carregando…</div>
