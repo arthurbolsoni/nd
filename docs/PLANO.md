@@ -57,10 +57,10 @@ Um executável, `nd.exe`, em dois papéis:
 
 Partes do `nd`:
 
-- Desktop oculto (`CreateDesktopW` + `CreateProcessW`, crate `windows`), porte do
+- Desktop oculto opcional (`CreateDesktopW` + `CreateProcessW`, crate `windows`), porte do
   `~/.claude/skills/nodriver-isolado/files/edge_isolado.py`, com emulação de foco e checagem de
-  perfil ocupado. Padrão; `nd start --visivel` abre no desktop do usuário para login, captcha ou
-  2FA.
+  perfil ocupado. `nd start` abre o Edge no desktop do usuário; `nd start --oculto` abre no
+  desktop oculto.
 - JS injetado em arquivos `.js` (`include_str!`): snapshot, receitas, diff pós-ação.
 - Atlas em YAML (serde).
 - `~/nodriver/fechar.ps1` passa a encerrar o daemon.
@@ -69,7 +69,7 @@ Partes do `nd`:
 
 | Comando | Faz |
 |---|---|
-| `nd start [--visivel]` / `nd stop` | sobe ou encerra daemon e Edge |
+| `nd start [--oculto]` / `nd stop` | sobe ou encerra daemon e Edge |
 | `nd open <url> [--nova]` | navega e espera rede ociosa + DOM parado |
 | `nd tabs` / `nd tab <n\|trecho>` | lista abas, escolhe a ativa |
 | `nd map [--tudo] [--dentro <ref>]` | snapshot compacto com refs |
@@ -139,7 +139,7 @@ Levantadas dos scripts do `~/nodriver` (`iframe_file`, `blobcap`, `formsave`, `f
 
 ### Atlas
 
-`<dir do atlas>/<dominio>.yaml`:
+`~/nodriver/sites/<dominio>.yaml`:
 
 ```yaml
 site: jobs.ashbyhq.com
@@ -195,7 +195,7 @@ replay; `--ate N` limita até o passo N.
   certo.
 - Detecção: abrir pelo `nd` os sites que hoje passam com o nodriver Python (LinkedIn, um com
   Cloudflare) e comparar.
-- Aceitação: site real sem skill; tarefa do zero com `nd`, atlas gravado, repetição com `nd run`;
+- Aceitação no Facebook: tarefa do zero com `nd`, atlas gravado, repetição com `nd run`;
   comparação do número de chamadas de ferramenta com o método atual.
 
 ## Fases

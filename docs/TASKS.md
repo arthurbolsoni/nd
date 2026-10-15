@@ -5,9 +5,9 @@
 - [x] Fork `ultrafunkamsterdam/nodriver` → `arthurbolsoni/nodriver-rs` (público), clone em `~/desktop/nd-projeto/nodriver-rs`, remote `upstream`
 - [x] Projeto `nd` em `~/desktop/nd-projeto/nd` (Cargo, git)
 - [x] Repo privado `arthurbolsoni/nd`
-- [ ] Decidir: desktop oculto como padrão
-- [ ] Decidir: local do atlas (`~/nodriver/sites/` ou dentro de `~/.claude`)
-- [ ] Decidir: site do teste de aceitação
+- [x] Decidido: desktop oculto opcional (`nd start --oculto`)
+- [x] Decidido: atlas em `~/nodriver/sites/`
+- [x] Decidido: aceitação no Facebook
 
 ## 1. Biblioteca `nodriver-rs`
 
@@ -26,7 +26,7 @@
 - [ ] Dependência `nodriver` por path
 - [ ] CLI (clap): `start`, `stop`, `daemon`, `open`, `tabs`, `tab`, `eval`, `text`
 - [ ] Daemon HTTP em `127.0.0.1` + `.token`
-- [ ] Desktop oculto: porte do `edge_isolado.py` (CreateDesktopW, foco emulado, perfil ocupado, `--visivel`)
+- [ ] Desktop oculto: porte do `edge_isolado.py` (CreateDesktopW, foco emulado, perfil ocupado, `--oculto`)
 - [ ] Espera pós-navegação: rede ociosa + DOM parado
 - [ ] `fechar.ps1` encerra o daemon
 - [ ] Conferência de detecção nos sites que passam com o nodriver Python
@@ -65,6 +65,6 @@
 
 ## 8. Aceitação
 
-- [ ] Tarefa do zero com `nd` no site escolhido
+- [ ] Tarefa do zero com `nd` no Facebook
 - [ ] Atlas gravado, repetição com `nd run`
 - [ ] Contagem de chamadas de ferramenta: método atual × `nd`
