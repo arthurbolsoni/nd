@@ -186,6 +186,14 @@ struct Pedido {
     longo: bool,
 }
 
+/// Alvo filho de onde veio a chamada: iframe de outro site (processo próprio) ou worker.
+#[derive(Debug, Clone)]
+pub struct Sub {
+    pub alvo: String,
+    /// `iframe`, `worker`, `shared_worker`, `service_worker`.
+    pub tipo: String,
+}
+
 /// Uma chamada de rede guardada.
 #[derive(Debug, Clone)]
 pub struct Chamada {
@@ -210,6 +218,8 @@ pub struct Chamada {
     pub binaria: bool,
     /// Navegação que o navegador transformou em download.
     pub download: bool,
+    /// Feita por um iframe de outro site ou por um worker (None = a página da aba).
+    pub sub: Option<Sub>,
     /// Bytes recebidos (`encodedDataLength`).
     pub tamanho: u64,
     pub inicio: Instant,
@@ -318,8 +328,9 @@ pub struct Rede {
 }
 
 impl Rede {
-    /// Atualiza o estado com um evento da aba `alvo` e diz quais corpos buscar.
-    pub fn evento(&self, alvo: &str, ev: &RawEvent) -> Vec<Buscar> {
+    /// Atualiza o estado com um evento da aba `alvo` (vindo da sessão da aba, ou de um iframe ou
+    /// worker dela em `sub`) e diz quais corpos buscar.
+    pub fn evento(&self, alvo: &str, sub: Option<&Sub>, ev: &RawEvent) -> Vec<Buscar> {
         let p = &ev.params;
         let Some(id) = p.get("requestId").and_then(|v| v.as_str()) else {
             return Vec::new();
@@ -349,7 +360,9 @@ impl Rede {
                         tipo: tipo.to_string(),
                         inicio: Instant::now(),
                         url: url.to_string(),
-                        longo: iframe || terceiro || eh_ruido || !CONTAM.contains(&tipo),
+                        // Iframe de outro site e worker não seguram a espera da aba (`nd wait
+                        // net` espera por eles).
+                        longo: iframe || terceiro || eh_ruido || sub.is_some() || !CONTAM.contains(&tipo),
                     },
                 );
                 a.ultima = Instant::now();
@@ -357,10 +370,13 @@ impl Rede {
 
                 let mut ch = self.chamadas.lock().unwrap();
                 // Redirecionamento: mesmo requestId, URL nova.
-                if p.get("redirectResponse").is_some()
-                    && let Some(c) = ch.achar(alvo, id)
-                {
-                    c.url = url.to_string();
+                if let Some(c) = ch.achar(alvo, id) {
+                    if p.get("redirectResponse").is_some() {
+                        c.url = url.to_string();
+                    } else if c.sub.is_none() {
+                        // Documento do iframe: começa na sessão da aba e segue na do iframe.
+                        c.sub = sub.cloned();
+                    }
                     return buscar;
                 }
                 if !GUARDA.contains(&tipo) || eh_ruido || fora_do_buffer(url) {
@@ -394,6 +410,7 @@ impl Rede {
                     cortada: false,
                     binaria: false,
                     download: false,
+                    sub: sub.cloned(),
                     tamanho: 0,
                     inicio: Instant::now(),
                     fim: None,

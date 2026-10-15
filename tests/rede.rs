@@ -129,6 +129,25 @@ async fn net_e_api() {
     let r = nd.run(&["api", "9999"]);
     assert!(!r.status.success());
     tem(&String::from_utf8_lossy(&r.stderr), "não está mais guardada");
+    // Iframe de outro site (processo próprio) e worker: as chamadas entram no buffer da aba,
+    // marcadas com a origem.
+    tem(&nd.ok(&["click", "Consultar CEP"]), "cep ");
+    nd.ok(&["wait", "net", "cep=01310"]);
+    let net = nd.ok(&["net", "cep="]);
+    tem(&net, "?cep=01310 (iframe)");
+    let cep = numero(&net, "cep=01310");
+    tem(&nd.ok(&["net", "--corpo", &cep]), "\"cep\": \"01310-100\"");
+    // Refeita dentro do iframe: origem e cookies são os dele.
+    let s = nd.ok(&["api", &cep, "--caminho", "origem"]);
+    tem(&s, "\"http://localhost:");
+    nd.ok(&["click", "Worker"]);
+    nd.ok(&["wait", "net", "pagina=7"]);
+    let s = nd.ok(&["net", "pagina=7"]);
+    assert_eq!(s.lines().count(), 1, "{s}");
+    tem(&s, "/api/lista?pagina=7 (worker)");
+    tem(&s, "→ {itens:");
+    tem(&nd.ok(&["text", "--sel", "#saida"]), "worker 7");
+
     // Outra página: `nd net` mostra só as chamadas dela; `--antigas` traz as anteriores.
     nd.ok(&["open", &format!("{base}/outra.html"), "--sem-map"]);
     let s = nd.ok(&["net"]);

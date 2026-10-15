@@ -54,8 +54,10 @@ nd stop
 - `nd net`: chamadas XHR/fetch/documento da página atual, uma por linha, com a forma do JSON da
   resposta e o nome da operação GraphQL:
   `#3 GET 200 /w/rest.php/v1/search/title?q=Recife 1.7 KB 30 ms → {pages: [{id: num, title: str, …} ×10]}`
+  Chamadas de iframe de outro site e de worker entram na lista da aba, marcadas com `(iframe)` ou
+  `(worker)`; elas não seguram a espera da ação (`nd wait net` espera por elas).
 - `nd api N` refaz a chamada `#N` por `fetch` dentro da página (cookies e origem do site), com o
-  corpo ou a URL alterados.
+  corpo ou a URL alterados; chamada de iframe é refeita dentro do iframe.
 - Downloads ficam sempre ligados e vão para `~/.nd/downloads`; a ação que baixa algo mostra
   `download: <caminho>`. Abas abertas pela ação aparecem como `aba nova [n]`.
 - `nd download <alvo>` clica e grava o arquivo que o clique gerar: download, resposta que abre na

@@ -9,6 +9,8 @@ pub mod pagina;
 pub mod rede;
 
 use std::collections::HashSet;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -17,7 +19,7 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::post;
 use nodriver::{Browser, Config, Error, RECONNECTED_EVENT, Tab};
-use serde_json::json;
+use serde_json::{Value, json};
 use tokio::sync::Notify;
 
 use crate::cliente::{Pedido, Resposta};
@@ -53,6 +55,8 @@ pub struct Daemon {
     criadas: Mutex<Vec<(String, Instant)>>,
     /// Abas com `Network` ligado e eventos sendo acompanhados.
     preparadas: Mutex<HashSet<String>>,
+    /// Sessões de iframe de outro site e de worker com a rede acompanhada.
+    filhos: Mutex<HashSet<String>>,
     fila: tokio::sync::Mutex<()>,
     pub parar: Notify,
     _desktop: Option<DesktopOculto>,
@@ -102,6 +106,7 @@ pub async fn rodar(op: Opcoes) -> Result<(), String> {
         criadas: Mutex::new(Vec::new()),
         historico: Mutex::new(Vec::new()),
         preparadas: Mutex::new(HashSet::new()),
+        filhos: Mutex::new(HashSet::new()),
         fila: tokio::sync::Mutex::new(()),
         parar: Notify::new(),
         _desktop: desktop,
@@ -206,30 +211,50 @@ async fn tratar(
     (StatusCode::OK, Json(r))
 }
 
-/// Liga `Network` (e o foco emulado, no desktop oculto) numa aba e acompanha a rede dela.
+/// Buffers de corpo explícitos: o navegador guarda as respostas para `Network.getResponseBody`.
+fn params_rede() -> Value {
+    json!({ "maxTotalBufferSize": 100_000_000, "maxResourceBufferSize": 10_000_000 })
+}
+
+/// Auto-attach com pausa: iframe de outro site (processo próprio) e worker esperam, antes de
+/// rodar, o daemon ligar a rede neles.
+fn params_auto_attach() -> Value {
+    json!({ "autoAttach": true, "waitForDebuggerOnStart": true, "flatten": true })
+}
+
+/// Liga `Network` (e o foco emulado, no desktop oculto) numa aba e acompanha a rede dela e dos
+/// iframes de outro site e workers dela.
 pub async fn preparar_aba(d: &Arc<Daemon>, alvo: &str) -> nodriver::Result<Tab> {
     let tab = d.browser.tab(alvo).await?;
     let nova = d.preparadas.lock().unwrap().insert(alvo.to_string());
     if nova {
         let mut eventos = tab.subscribe_raw(Some("Network."));
         let fraco = Arc::downgrade(d);
-        let alvo_ = alvo.to_string();
-        let tab_ = tab.clone();
+        let aba = alvo.to_string();
         tokio::spawn(async move {
             while let Some(ev) = eventos.next().await {
                 let Some(d) = fraco.upgrade() else { break };
-                for b in d.rede.evento(&alvo_, &ev) {
-                    tokio::spawn(buscar_corpo(d.clone(), tab_.clone(), b));
+                for b in d.rede.evento(&aba, None, &ev) {
+                    tokio::spawn(buscar_corpo(d.clone(), aba.clone(), None, b));
                 }
             }
         });
         let mut dialogos = tab.subscribe_raw(Some("Page.javascriptDialogOpening"));
         let fraco = Arc::downgrade(d);
-        let tab_ = tab.clone();
+        let aba = alvo.to_string();
         tokio::spawn(async move {
             while let Some(ev) = dialogos.next().await {
                 let Some(d) = fraco.upgrade() else { break };
-                aceitar_dialogo(&d, &tab_, &ev.params).await;
+                aceitar_dialogo(&d, &aba, None, &ev.params).await;
+            }
+        });
+        let mut filhos = tab.subscribe_raw(Some("Target.attachedToTarget"));
+        let fraco = Arc::downgrade(d);
+        let aba = alvo.to_string();
+        tokio::spawn(async move {
+            while let Some(ev) = filhos.next().await {
+                let Some(d) = fraco.upgrade() else { break };
+                tokio::spawn(adotar_filho(d, aba.clone(), ev.params.clone()));
             }
         });
         ligar_dominios(d, &tab).await;
@@ -237,18 +262,140 @@ pub async fn preparar_aba(d: &Arc<Daemon>, alvo: &str) -> nodriver::Result<Tab> 
     Ok(tab)
 }
 
+/// Espera a sessão `sessao` acabar (`Target.detachedFromTarget`).
+async fn fim_da_sessao(mut desligados: nodriver::RawEventStream, sessao: String) {
+    while let Some(ev) = desligados.next().await {
+        if ev.params["sessionId"].as_str() == Some(sessao.as_str()) {
+            return;
+        }
+    }
+}
+
+/// Iframe de outro site ou worker que o navegador ligou (auto-attach) à aba `aba` ou a um iframe
+/// dela: a biblioteca adota a sessão (o mapa e as ações usam a mesma), a rede dele entra no
+/// buffer da aba, diálogos são aceitos, e o alvo, parado esperando, segue.
+fn adotar_filho(d: Arc<Daemon>, aba: String, p: Value) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+    Box::pin(async move {
+        let Some(sessao) = p["sessionId"].as_str().map(str::to_string) else {
+            return;
+        };
+        let info = &p["targetInfo"];
+        let alvo = info["targetId"].as_str().unwrap_or("").to_string();
+        let tipo = info["type"].as_str().unwrap_or("").to_string();
+        let conn = d.browser.connection().clone();
+        conn.adopt(&alvo, &sessao);
+        let curto = Duration::from_secs(5);
+        let acompanha = matches!(
+            tipo.as_str(),
+            "iframe" | "worker" | "shared_worker" | "service_worker"
+        );
+        if acompanha && d.filhos.lock().unwrap().insert(sessao.clone()) {
+            let sub = rede::Sub {
+                alvo: alvo.clone(),
+                tipo: tipo.clone(),
+            };
+            let mut eventos = conn.subscribe_raw(Some("Network."), Some(&sessao));
+            let fim = fim_da_sessao(
+                conn.subscribe_raw(Some("Target.detachedFromTarget"), None),
+                sessao.clone(),
+            );
+            let fraco = Arc::downgrade(&d);
+            let (aba_, sessao_) = (aba.clone(), sessao.clone());
+            tokio::spawn(async move {
+                tokio::pin!(fim);
+                loop {
+                    let ev = tokio::select! {
+                        ev = eventos.next() => ev,
+                        _ = &mut fim => None,
+                    };
+                    let Some(ev) = ev else { break };
+                    let Some(d) = fraco.upgrade() else { break };
+                    for b in d.rede.evento(&aba_, Some(&sub), &ev) {
+                        tokio::spawn(buscar_corpo(d.clone(), aba_.clone(), Some(sessao_.clone()), b));
+                    }
+                }
+                if let Some(d) = fraco.upgrade() {
+                    d.filhos.lock().unwrap().remove(&sessao_);
+                }
+            });
+            if tipo == "iframe" {
+                // Diálogo e iframe de outro site aninhado chegam pela sessão do iframe.
+                let mut eventos = conn.subscribe_raw(None, Some(&sessao));
+                let fim = fim_da_sessao(
+                    conn.subscribe_raw(Some("Target.detachedFromTarget"), None),
+                    sessao.clone(),
+                );
+                let fraco = Arc::downgrade(&d);
+                let (aba_, sessao_) = (aba.clone(), sessao.clone());
+                tokio::spawn(async move {
+                    tokio::pin!(fim);
+                    loop {
+                        let ev = tokio::select! {
+                            ev = eventos.next() => ev,
+                            _ = &mut fim => None,
+                        };
+                        let Some(ev) = ev else { break };
+                        let Some(d) = fraco.upgrade() else { break };
+                        match ev.method.as_str() {
+                            "Page.javascriptDialogOpening" => {
+                                aceitar_dialogo(&d, &aba_, Some(&sessao_), &ev.params).await
+                            }
+                            "Target.attachedToTarget" => {
+                                tokio::spawn(adotar_filho(d.clone(), aba_.clone(), ev.params.clone()));
+                            }
+                            _ => {}
+                        }
+                    }
+                });
+            }
+        }
+        if acompanha {
+            let r = conn
+                .call_with_timeout("Network.enable", params_rede(), Some(&sessao), curto)
+                .await;
+            if let Err(e) = r {
+                tracing::debug!("Network.enable em {tipo} {alvo}: {e}");
+            }
+        }
+        if tipo == "iframe" {
+            for (metodo, params) in [
+                ("Page.enable", json!({})),
+                ("Target.setAutoAttach", params_auto_attach()),
+            ] {
+                if let Err(e) = conn.call_with_timeout(metodo, params, Some(&sessao), curto).await {
+                    tracing::debug!("{metodo} no iframe {alvo}: {e}");
+                }
+            }
+        }
+        // Sempre solta o alvo, mesmo se algo acima falhou: senão o iframe ou worker fica parado.
+        if p["waitingForDebugger"] == json!(true) {
+            let r = conn
+                .call_with_timeout("Runtime.runIfWaitingForDebugger", json!({}), Some(&sessao), curto)
+                .await;
+            if let Err(e) = r {
+                tracing::warn!("{tipo} {alvo} não foi solto: {e}");
+            }
+        }
+    })
+}
+
 /// Pede ao navegador um corpo de chamada e o guarda (a resposta fica disponível só por um tempo
-/// depois do `loadingFinished`).
-async fn buscar_corpo(d: Arc<Daemon>, tab: Tab, b: rede::Buscar) {
-    let alvo = tab.target_id();
+/// depois do `loadingFinished`). `sessao` = a do iframe ou worker; `None` = a da aba.
+async fn buscar_corpo(d: Arc<Daemon>, aba: String, sessao: Option<String>, b: rede::Buscar) {
+    let conn = d.browser.connection().clone();
+    let sessao = sessao.or_else(|| conn.session_of(&aba));
     match b {
         rede::Buscar::Resposta(id) => {
-            match tab
-                .call("Network.getResponseBody", json!({ "requestId": id }))
+            match conn
+                .call(
+                    "Network.getResponseBody",
+                    json!({ "requestId": id }),
+                    sessao.as_deref(),
+                )
                 .await
             {
                 Ok(v) => d.rede.com_resposta(
-                    alvo,
+                    &aba,
                     &id,
                     v["body"].as_str().unwrap_or(""),
                     v["base64Encoded"].as_bool().unwrap_or(false),
@@ -257,41 +404,49 @@ async fn buscar_corpo(d: Arc<Daemon>, tab: Tab, b: rede::Buscar) {
             }
         }
         rede::Buscar::Enviado(id) => {
-            if let Ok(v) = tab
-                .call("Network.getRequestPostData", json!({ "requestId": id }))
+            if let Ok(v) = conn
+                .call(
+                    "Network.getRequestPostData",
+                    json!({ "requestId": id }),
+                    sessao.as_deref(),
+                )
                 .await
             {
                 d.rede
-                    .com_enviado(alvo, &id, v["postData"].as_str().unwrap_or(""));
+                    .com_enviado(&aba, &id, v["postData"].as_str().unwrap_or(""));
             }
         }
     }
 }
 
 /// Aceita `alert`/`confirm`/`prompt`/`beforeunload` (a ação que o abriu foi pedida) e guarda o
-/// texto para a saída do comando.
-async fn aceitar_dialogo(d: &Daemon, tab: &Tab, p: &serde_json::Value) {
+/// texto para a saída do comando. `sessao` = a do iframe que abriu; `None` = a da aba.
+async fn aceitar_dialogo(d: &Daemon, aba: &str, sessao: Option<&str>, p: &Value) {
     let tipo = p["type"].as_str().unwrap_or("alert");
     let msg = p["message"].as_str().unwrap_or("");
-    let r = tab
+    let conn = d.browser.connection();
+    let sessao = sessao.map(str::to_string).or_else(|| conn.session_of(aba));
+    let r = conn
         .call(
             "Page.handleJavaScriptDialog",
             json!({ "accept": true, "promptText": p["defaultPrompt"].as_str().unwrap_or("") }),
+            sessao.as_deref(),
         )
         .await;
     if let Err(e) = r {
-        tracing::warn!("diálogo {tipo} em {}: {e}", tab.target_id());
+        tracing::warn!("diálogo {tipo} em {aba}: {e}");
     }
-    d.paginas
-        .dialogo(tab.target_id(), format!("diálogo {tipo} {msg:?} aceito"));
+    d.paginas.dialogo(aba, format!("diálogo {tipo} {msg:?} aceito"));
 }
 
 /// Domínios que o daemon precisa em cada aba. Uma reconexão cria sessões novas, onde eles
 /// voltam desligados.
 async fn ligar_dominios(d: &Daemon, tab: &Tab) {
-    // Buffers de corpo explícitos: o navegador guarda as respostas para Network.getResponseBody.
-    let rede = json!({ "maxTotalBufferSize": 100_000_000, "maxResourceBufferSize": 10_000_000 });
-    for (dominio, params) in [("Network.enable", rede), ("Page.enable", json!({}))] {
+    for (dominio, params) in [
+        ("Network.enable", params_rede()),
+        ("Page.enable", json!({})),
+        ("Target.setAutoAttach", params_auto_attach()),
+    ] {
         if let Err(e) = tab.call(dominio, params).await {
             tracing::warn!("{dominio} em {}: {e}", tab.target_id());
         }

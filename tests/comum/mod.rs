@@ -148,6 +148,7 @@ pub async fn servir() -> String {
                             "corpo": String::from_utf8_lossy(&corpo_req),
                             "token": h("x-token"),
                             "cookie": h("cookie"),
+                            "origem": h("origin"),
                         });
                         ("200 OK", json, v.to_string().into_bytes())
                     }
@@ -159,6 +160,7 @@ pub async fn servir() -> String {
                         ("200 OK", "application/pdf", PDF.to_vec())
                     }
                     _ => match std::fs::read(raiz.join(rota.trim_start_matches('/'))) {
+                        Ok(b) if rota.ends_with(".js") => ("200 OK", "text/javascript", b),
                         Ok(b) => ("200 OK", "text/html; charset=utf-8", b),
                         Err(_) => ("404 Not Found", "text/plain", b"404".to_vec()),
                     },

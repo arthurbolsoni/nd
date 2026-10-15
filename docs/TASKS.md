@@ -129,3 +129,9 @@ Commit `051992e` no fork.
   página recortada por uma área (carrossel) sai em `fora da vista N (seguem na página)`; clique
   em item recortado pela área rola para a vista; `nada novo carregou` no `nd scroll` sem novidade.
   Teste em `tests/rolagem.rs` (lista com rolagem própria e carrossel em `rolagem.html`)
+- [x] Rede de iframe de outro site (processo próprio) e de worker: auto-attach com pausa em cada
+  aba e iframe, sessão adotada pela biblioteca (`Connection::adopt`), chamadas no buffer da aba
+  marcadas `(iframe)`/`(worker)`, `nd api` dentro do iframe, diálogo de iframe aceito.
+  Biblioteca: `Browser::tabs` não esquece mais a sessão de iframe em cache. Testes:
+  `crates/nodriver/tests/autoattach.rs` e `tests/rede.rs` (iframe `cep.html`, worker
+  `trabalhador.js`)

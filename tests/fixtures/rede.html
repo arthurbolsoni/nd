@@ -7,7 +7,10 @@
 <button id="form">Enviar form</button>
 <button id="stream">Stream</button>
 <button id="bin">Baixar binário</button>
+<button id="worker">Worker</button>
 <p id="saida"></p>
+<!-- Outro site (localhost × 127.0.0.1): o iframe roda em processo próprio. -->
+<iframe id="externo" title="CEP"></iframe>
 <script>
   document.cookie = 'sessao=abc123; path=/';
   const out = (t) => { document.getElementById('saida').textContent = t; };
@@ -37,6 +40,10 @@
   document.getElementById('bin').onclick = async () => {
     out('bin ' + (await (await fetch('/arquivo.bin')).arrayBuffer()).byteLength);
   };
+  const trabalhador = new Worker('/trabalhador.js');
+  trabalhador.onmessage = (e) => out('worker ' + e.data);
+  document.getElementById('worker').onclick = () => trabalhador.postMessage(1);
+  document.getElementById('externo').src = 'http://localhost:' + location.port + '/cep.html';
 </script>
 </body>
 </html>

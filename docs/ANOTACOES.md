@@ -253,7 +253,8 @@
 
 ### Limites
 
-- A rede de iframe de outro processo (target próprio) não é capturada; só a das abas.
+- A rede de iframe de outro processo (target próprio) não é capturada; só a das abas (resolvido
+  depois: ver "rede de iframe de outro site e de worker").
 - Documento em streaming (Facebook) fica "em andamento" no `nd net` até o HTML terminar.
 
 ## 2026-10-15 — fase 5 (receitas)
@@ -485,3 +486,37 @@ Depois:
 
 Carrossel por `transform` depois de "Próximo":
 `fora da vista 3 (seguem na página): e11 "Cartão 1"; e12 "Cartão 2"; e13 "Cartão 3"`.
+
+## 2026-10-15 — rede de iframe de outro site e de worker
+
+### Decisões
+
+- Cada aba recebe `Target.setAutoAttach` com `waitForDebuggerOnStart` e `flatten`: iframe de outro
+  site (processo próprio) e worker param antes de rodar; o daemon adota a sessão
+  (`Connection::adopt`), liga `Network` nela e só então manda `Runtime.runIfWaitingForDebugger`.
+  A primeira requisição do iframe já entra. O alvo é solto mesmo quando um passo anterior falha.
+- Iframe adotado também recebe `Page.enable` (diálogo de iframe é aceito como o da aba) e
+  `Target.setAutoAttach` (iframe de outro site dentro dele).
+- As chamadas entram no buffer da aba com `sub` (alvo e tipo) e aparecem como `(iframe)` ou
+  `(worker)`. Não contam na espera de rede da ação (anúncio e widget em iframe atrasariam toda
+  ação); `nd wait net` e `nd net --novas` incluem as chamadas deles.
+- Documento do iframe começa na sessão da aba e segue na do iframe com o mesmo `requestId`: vira
+  uma chamada só.
+- `nd api` de chamada de iframe roda o `fetch` no mundo isolado do iframe (origem e cookies dele);
+  chamada de worker é refeita pela página, com aviso.
+- O corpo da resposta é pedido na sessão onde a chamada aconteceu.
+
+### Achados
+
+- `Browser::tabs` da biblioteca esquecia a sessão de todo `Tab` em cache que não fosse do tipo
+  `page`. O daemon chama `tabs()` em todo comando, então o `Tab` do iframe (usado pelo mapa)
+  perdia a sessão e o `attach` seguinte abria outra no mesmo alvo. Corrigido no fork: só sai do
+  cache o alvo que não existe mais.
+- Sem a adoção, o auto-attach e o `attach` do mapa criariam duas sessões no mesmo iframe, o mesmo
+  problema da corrida da fase 4 (`Network` numa, `getResponseBody` noutra).
+- Worker dedicado aceita `Network.enable` na sessão dele; a chamada dele aparece uma vez no
+  `nd net`, marcada `(worker)` (teste em `tests/rede.rs`).
+- Service worker não foi testado: o que ele busca por conta própria pode continuar fora.
+- Depois de uma reconexão, as sessões adotadas antigas não voltam; o `Target.setAutoAttach`
+  reenviado às abas liga os iframes e workers de novo, com sessões novas.
+

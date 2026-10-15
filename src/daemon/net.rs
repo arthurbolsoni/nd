@@ -363,6 +363,9 @@ pub fn linha(c: &Chamada, origem_pagina: &str) -> String {
     if let Some(op) = operacao(c) {
         l.push_str(&format!(" [{op}]"));
     }
+    if let Some(s) = &c.sub {
+        l.push_str(&format!(" ({})", s.tipo.replace('_', " ")));
+    }
     if c.em_andamento() {
         l.push_str(&format!(" (em andamento há {})", duracao(c)));
         return l;
@@ -753,14 +756,47 @@ pub async fn api(d: &Arc<Daemon>, a: ApiArgs) -> R {
         None => aba_atual(d).await?,
     };
     let mut avisos = Vec::new();
-    let org_pagina = origem(&tab.url().await.unwrap_or_default());
-    if origem(&url) != org_pagina {
+    // Chamada de iframe de outro site: refeita dentro do iframe (origem e cookies dele), se ele
+    // ainda existe. Worker não roda o nd.js; a chamada dele é refeita pela página.
+    let iframe = c
+        .sub
+        .as_ref()
+        .filter(|s| s.tipo == "iframe" && d.browser.connection().session_of(&s.alvo).is_some());
+    let (q, org_contexto) = match iframe {
+        Some(s) => {
+            let q = pagina::Quadro {
+                alvo: s.alvo.clone(),
+                frame: s.alvo.clone(),
+            };
+            let u = d
+                .browser
+                .tab(&s.alvo)
+                .await
+                .map_err(|e| e.to_string())?
+                .url()
+                .await;
+            (q, origem(&u.unwrap_or_default()))
+        }
+        None => {
+            if let Some(s) = &c.sub {
+                avisos.push(format!(
+                    "aviso: chamada de {} refeita pela página da aba",
+                    s.tipo.replace('_', " ")
+                ));
+            }
+            (
+                pagina::principal(d, &tab).await?,
+                origem(&tab.url().await.unwrap_or_default()),
+            )
+        }
+    };
+    if origem(&url) != org_contexto {
         avisos.push(format!(
-            "aviso: a aba está em {org_pagina} e a chamada vai para {}; fora da mesma origem o site pode barrar (CORS)",
+            "aviso: a {} está em {org_contexto} e a chamada vai para {}; fora da mesma origem o site pode barrar (CORS)",
+            if iframe.is_some() { "chamada é do iframe, que" } else { "aba" },
             origem(&url)
         ));
     }
-    let q = pagina::principal(d, &tab).await?;
     let t0 = Instant::now();
     let r = js(
         d,
@@ -918,6 +954,7 @@ mod testes {
             cortada: false,
             binaria: false,
             download: false,
+            sub: None,
             tamanho: 0,
             inicio: Instant::now(),
             fim: None,
