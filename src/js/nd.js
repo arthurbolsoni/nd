@@ -744,6 +744,30 @@
     return parcial ? { r: refPara(parcial), l: descrCurta(parcial), prox } : { r: null, prox };
   }
 
+  // Refaz uma chamada com fetch daqui (mesma origem e cookies da página). Com `base64`, devolve os
+  // bytes da resposta em base64 (arquivo binário).
+  async function api(a) {
+    try {
+      const r = await fetch(a.url, {
+        method: a.metodo,
+        headers: a.cabecalhos,
+        body: a.corpo ?? undefined,
+        credentials: 'include',
+      });
+      const tipo = r.headers.get('content-type') || '';
+      if (a.base64) {
+        const buf = new Uint8Array(await r.arrayBuffer());
+        let bin = '';
+        for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+        return { status: r.status, tipo, b64: btoa(bin), tamanho: buf.length, url: r.url };
+      }
+      const t = await r.text();
+      return { status: r.status, tipo, texto: t.length > a.max ? t.slice(0, a.max) : t, tamanho: t.length, url: r.url };
+    } catch (e) {
+      return { erro: String(e) };
+    }
+  }
+
   // Espera o DOM ficar `ms` sem mudança de estrutura ou texto, até `max` ms.
   function quieto(a) {
     return new Promise((resolve) => {
@@ -771,6 +795,6 @@
     achar: (a) => !!achar(a.ref),
     doc: () => meuDoc,
     mapa, localizar, ponto, caixaQuadro, tipo, preparar, definir, estado, escolher, opcoes,
-    clicarJs, focar, temTexto, temSel, porTexto, quieto,
+    clicarJs, focar, temTexto, api, temSel, porTexto, quieto,
   };
 })()

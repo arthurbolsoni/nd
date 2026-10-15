@@ -643,6 +643,14 @@ pub async fn agir(d: &Arc<Daemon>, a: AcaoArgs, acao: Acao) -> R {
     }
     out.extend(notas);
     out.extend(d.paginas.tirar_dialogos(&aba));
+    let origem = tab.url().await.unwrap_or_default();
+    let origem = origem
+        .split_once("://")
+        .map(|(e, r)| format!("{e}://{}", r.split(['/', '?', '#']).next().unwrap_or("")))
+        .unwrap_or_default();
+    if let Some(r) = super::net::resumo(d, &aba, t0, &origem) {
+        out.push(r);
+    }
     if !a.sem_diff {
         let depois = pagina::instantaneo(d, &tab, &op).await?;
         out.push(pagina::diferenca(&antes, &depois));

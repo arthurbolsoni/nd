@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="pt-BR">
+<head><meta charset="utf-8"><title>Rede</title></head>
+<body>
+<button id="lista">Buscar lista</button>
+<button id="json">Enviar JSON</button>
+<button id="form">Enviar form</button>
+<button id="stream">Stream</button>
+<button id="bin">Baixar binário</button>
+<p id="saida"></p>
+<script>
+  document.cookie = 'sessao=abc123; path=/';
+  const out = (t) => { document.getElementById('saida').textContent = t; };
+  document.getElementById('lista').onclick = async () => {
+    const j = await (await fetch('/api/lista?pagina=1')).json();
+    out('itens: ' + j.itens.length);
+  };
+  document.getElementById('json').onclick = async () => {
+    const r = await fetch('/api/eco?x=1', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-token': 'tok1' },
+      body: JSON.stringify({ operationName: 'Busca', variables: { pagina: 1, termo: 'casa' } }),
+    });
+    out('eco ' + (await r.json()).metodo);
+  };
+  document.getElementById('form').onclick = async () => {
+    const r = await fetch('/api/eco', {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: 'fb_api_req_friendly_name=ListaQuery&variables=' + encodeURIComponent(JSON.stringify({ count: 2 })),
+    });
+    out('form ' + r.status);
+  };
+  document.getElementById('stream').onclick = async () => {
+    out('stream ' + (await (await fetch('/api/stream')).text()).length);
+  };
+  document.getElementById('bin').onclick = async () => {
+    out('bin ' + (await (await fetch('/arquivo.bin')).arrayBuffer()).byteLength);
+  };
+</script>
+</body>
+</html>

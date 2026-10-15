@@ -3,6 +3,7 @@
 
 pub mod acoes;
 pub mod comandos;
+pub mod net;
 pub mod pagina;
 pub mod rede;
 
@@ -196,10 +197,13 @@ pub async fn preparar_aba(d: &Arc<Daemon>, alvo: &str) -> nodriver::Result<Tab> 
         let mut eventos = tab.subscribe_raw(Some("Network."));
         let fraco = Arc::downgrade(d);
         let alvo_ = alvo.to_string();
+        let tab_ = tab.clone();
         tokio::spawn(async move {
             while let Some(ev) = eventos.next().await {
                 let Some(d) = fraco.upgrade() else { break };
-                d.rede.evento(&alvo_, &ev);
+                for b in d.rede.evento(&alvo_, &ev) {
+                    tokio::spawn(buscar_corpo(d.clone(), tab_.clone(), b));
+                }
             }
         });
         let mut dialogos = tab.subscribe_raw(Some("Page.javascriptDialogOpening"));
@@ -214,6 +218,37 @@ pub async fn preparar_aba(d: &Arc<Daemon>, alvo: &str) -> nodriver::Result<Tab> 
         ligar_dominios(d, &tab).await;
     }
     Ok(tab)
+}
+
+/// Pede ao navegador um corpo de chamada e o guarda (a resposta fica disponível só por um tempo
+/// depois do `loadingFinished`).
+async fn buscar_corpo(d: Arc<Daemon>, tab: Tab, b: rede::Buscar) {
+    let alvo = tab.target_id();
+    match b {
+        rede::Buscar::Resposta(id) => {
+            match tab
+                .call("Network.getResponseBody", json!({ "requestId": id }))
+                .await
+            {
+                Ok(v) => d.rede.com_resposta(
+                    alvo,
+                    &id,
+                    v["body"].as_str().unwrap_or(""),
+                    v["base64Encoded"].as_bool().unwrap_or(false),
+                ),
+                Err(e) => tracing::debug!("corpo de {id}: {e}"),
+            }
+        }
+        rede::Buscar::Enviado(id) => {
+            if let Ok(v) = tab
+                .call("Network.getRequestPostData", json!({ "requestId": id }))
+                .await
+            {
+                d.rede
+                    .com_enviado(alvo, &id, v["postData"].as_str().unwrap_or(""));
+            }
+        }
+    }
 }
 
 /// Aceita `alert`/`confirm`/`prompt`/`beforeunload` (a ação que o abriu foi pedida) e guarda o
@@ -237,8 +272,10 @@ async fn aceitar_dialogo(d: &Daemon, tab: &Tab, p: &serde_json::Value) {
 /// Domínios que o daemon precisa em cada aba. Uma reconexão cria sessões novas, onde eles
 /// voltam desligados.
 async fn ligar_dominios(d: &Daemon, tab: &Tab) {
-    for dominio in ["Network.enable", "Page.enable"] {
-        if let Err(e) = tab.call(dominio, json!({})).await {
+    // Buffers de corpo explícitos: o navegador guarda as respostas para Network.getResponseBody.
+    let rede = json!({ "maxTotalBufferSize": 100_000_000, "maxResourceBufferSize": 10_000_000 });
+    for (dominio, params) in [("Network.enable", rede), ("Page.enable", json!({}))] {
+        if let Err(e) = tab.call(dominio, params).await {
             tracing::warn!("{dominio} em {}: {e}", tab.target_id());
         }
     }

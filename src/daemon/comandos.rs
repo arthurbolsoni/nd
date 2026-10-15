@@ -9,6 +9,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::acoes::{self, Acao, AcaoArgs};
+use super::net;
 use super::pagina::{self, OpFormato, OpMapa};
 use super::{Daemon, preparar_aba};
 use crate::cliente::Pedido;
@@ -77,6 +78,9 @@ pub async fn executar(d: &Arc<Daemon>, p: &Pedido) -> R {
             acoes::agir(d, x.base, Acao::Key { teclas: x.teclas }).await
         }
         "wait" => acoes::wait(d, args(p)?).await,
+        "net" => net::net(d, args(p)?).await,
+        "cdp" => cdp(d, args(p)?).await,
+        "api" => net::api(d, args(p)?).await,
         outro => Err(format!("comando desconhecido: {outro}")),
     }
 }
@@ -131,6 +135,21 @@ async fn paginas(d: &Daemon) -> Result<Vec<(String, String, String)>, String> {
         .filter(|t| t.r#type == "page")
         .map(|t| (t.target_id, t.title, t.url))
         .collect())
+}
+
+#[derive(Deserialize)]
+struct CdpArgs {
+    metodo: String,
+    #[serde(default)]
+    params: Value,
+}
+
+/// Comando CDP cru na sessão da aba atual (depuração).
+async fn cdp(d: &Arc<Daemon>, a: CdpArgs) -> R {
+    let tab = aba_atual(d).await?;
+    let params = if a.params.is_null() { json!({}) } else { a.params };
+    let v = tab.call(&a.metodo, params).await.map_err(e)?;
+    Ok(serde_json::to_string_pretty(&v).unwrap_or_default())
 }
 
 #[derive(Deserialize)]

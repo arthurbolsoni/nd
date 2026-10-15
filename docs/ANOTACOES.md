@@ -206,3 +206,52 @@
   ("Hubo un error accediendo a esta pagina").
 - Uma execução da suíte inteira teve `nd open` do `lento.html` falhando no `fluxo_completo`
   (stderr não guardado); não repetiu em sete execuções seguidas.
+
+## 2026-10-15 — fase 4 (rede)
+
+### Decisões
+
+- Buffer único das últimas 500 chamadas XHR/fetch/documento de todas as abas, numeradas (`#12`)
+  para `nd net --corpo` e `nd api`. Guarda método, URL, status, mime, cabeçalhos enviados, corpo
+  enviado e resposta em texto até 200 KB cada; soma dos corpos limitada a 40 MB (os mais antigos
+  saem primeiro). Resposta binária fica marcada, sem corpo.
+- Respostas pedidas com `Network.getResponseBody` logo depois do `loadingFinished`, só para mime
+  de texto (JSON, texto, XML, JS, form). Corpo enviado vem do `requestWillBeSent` ou de
+  `Network.getRequestPostData` quando não veio junto.
+- Fora do buffer: anúncio, métricas e log (mesmo filtro da espera de rede, mais `/ajax/bz` do
+  Facebook). Imagem, fonte e mídia não entram (só XHR, fetch e documento).
+- `nd net` mostra a página atual da aba (desde o último documento principal); `--antigas`,
+  `--todas`, `--novas` (desde a última ação), filtro por trecho de URL, método ou nome da
+  operação.
+- Forma do JSON: chaves e tipos na ordem original (`serde_json` com `preserve_order`), listas
+  com o tamanho e as chaves dos primeiros 20 itens juntas. Aceita `for (;;);` / `)]}'` na frente
+  e vários JSON em sequência (NDJSON).
+- Nome da operação na linha: `operationName` (JSON), `fb_api_req_friendly_name` ou
+  `operationName` (form ou URL).
+- `--caminho data.itens[].nome` seleciona parte da resposta (em `nd net --corpo` e `nd api`).
+- `nd api N` refaz a chamada por `fetch` no mundo isolado da aba da chamada: mesma origem e
+  cookies da página (conferido pelo eco do cookie e do cabeçalho `x-token` no teste). Copia os
+  cabeçalhos enviados, menos os que o `fetch` não aceita (`cookie`, `origin`, `referer`,
+  `sec-*`...). `--json` funde no corpo; `--set variables.count=20` muda um valor (no form, o
+  primeiro trecho é o campo e o resto vai dentro do JSON do campo); `--query pagina=2` muda a URL;
+  `--saida` grava os bytes da resposta. A chamada refeita também é capturada e a saída diz o
+  número dela.
+- Ações listam as chamadas feitas durante a ação (`rede (n):`, até 6) antes do diff.
+- `nd cdp <método> [json]` (oculto): CDP cru na aba atual, para depuração.
+
+### Corrida no `attach` da biblioteca
+
+- `Network.getResponseBody` dava "No resource with given identifier found" para toda resposta no
+  `nd`, e funcionava no teste da biblioteca. Depois de `Network.disable` + `Network.enable` pela
+  sessão atual, passava a funcionar.
+- Causa: duas chamadas simultâneas de `Browser::tab` para o mesmo alvo (o laço de início do daemon
+  e a descoberta de alvos; ou `open --nova` e a descoberta) faziam dois `Target.attachToTarget`.
+  O alvo ficava com duas sessões: o `Network.enable` ia para uma, e o `getResponseBody` para a
+  outra, que não guardava corpos.
+- `Connection::attach` agora é serializado por um mutex (commit no fork), com teste de
+  `attach` concorrente e de corpo depois de navegação.
+
+### Limites
+
+- A rede de iframe de outro processo (target próprio) não é capturada; só a das abas.
+- Documento em streaming (Facebook) fica "em andamento" no `nd net` até o HTML terminar.

@@ -1,5 +1,6 @@
-//! Requisições por aba, a partir dos eventos `Network.*`: as que estão em andamento (para a espera
-//! de rede ociosa) e as últimas concluídas (para `nd wait net`).
+//! Rede a partir dos eventos `Network.*`: requisições em andamento por aba (para a espera de rede
+//! ociosa) e as últimas chamadas XHR/fetch/documento de todas as abas, com corpo enviado e corpo
+//! da resposta em texto (para `nd net`, `nd api` e `nd wait net`).
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
@@ -72,8 +73,24 @@ const RUIDO_HOST: &[&str] = &[
 ];
 /// ...e por rótulo inteiro do host (`analytics.site.com`, `ads.site.com`).
 const RUIDO_ROTULO: &[&str] = &[
-    "ads", "ad", "adserver", "analytics", "metrics", "telemetry", "tracking", "tracker", "pixel",
-    "stats", "beacon", "collect", "collector", "events", "event", "log", "logs", "rum",
+    "ads",
+    "ad",
+    "adserver",
+    "analytics",
+    "metrics",
+    "telemetry",
+    "tracking",
+    "tracker",
+    "pixel",
+    "stats",
+    "beacon",
+    "collect",
+    "collector",
+    "events",
+    "event",
+    "log",
+    "logs",
+    "rum",
 ];
 
 fn host_de(url: &str) -> String {
@@ -101,7 +118,9 @@ fn site_de(url: &str) -> String {
     }
     let r: Vec<&str> = host.split('.').collect();
     let n = r.len();
-    let segundo_nivel = ["com", "net", "org", "gov", "edu", "co", "ac", "gob", "mil", "art", "blog", "app"];
+    let segundo_nivel = [
+        "com", "net", "org", "gov", "edu", "co", "ac", "gob", "mil", "art", "blog", "app",
+    ];
     let k = if n >= 3 && r[n - 1].len() == 2 && segundo_nivel.contains(&r[n - 2]) {
         3
     } else {
@@ -111,7 +130,20 @@ fn site_de(url: &str) -> String {
 }
 
 /// ...e pelo último trecho do caminho (`/collect`, `/event`).
-const RUIDO_CAMINHO: &[&str] = &["collect", "event", "events", "track", "beacon", "gen_204", "ping", "pixel"];
+const RUIDO_CAMINHO: &[&str] = &[
+    "collect",
+    "event",
+    "events",
+    "track",
+    "beacon",
+    "gen_204",
+    "ping",
+    "pixel",
+    // log do Facebook (banzai)
+    "bz",
+    "bnzai",
+    "logging_client_events",
+];
 
 fn ruido(url: &str) -> bool {
     if url.starts_with("blob:") || url.starts_with("data:") {
@@ -132,24 +164,66 @@ fn ruido(url: &str) -> bool {
 
 /// Requisição aberta há mais que isto deixa de segurar a espera (streaming, long-poll).
 const VELHA: Duration = Duration::from_secs(5);
-/// Requisições concluídas guardadas por aba.
-const MAX_CONCLUIDAS: usize = 500;
+/// Chamadas guardadas (todas as abas).
+const MAX_CHAMADAS: usize = 500;
+/// Corpo guardado por chamada (enviado e resposta), em bytes.
+pub const MAX_CORPO: usize = 200 * 1024;
+/// Soma dos corpos guardados; acima disso, os das chamadas mais antigas saem.
+const MAX_CORPOS_TOTAL: usize = 40 * 1024 * 1024;
+/// Tipos de recurso guardados como chamada.
+const GUARDA: &[&str] = &["XHR", "Fetch", "Document"];
 
 struct Pedido {
     tipo: String,
     inicio: Instant,
-    metodo: String,
     url: String,
-    status: i64,
     longo: bool,
 }
 
-pub struct Concluida {
-    pub quando: Instant,
+/// Uma chamada de rede guardada.
+#[derive(Debug, Clone)]
+pub struct Chamada {
+    /// Número para `nd net --corpo N` e `nd api N`.
+    pub n: u64,
+    pub aba: String,
+    pub id: String,
+    pub tipo: String,
+    /// Documento do frame principal da aba (início de uma página).
+    pub principal: bool,
     pub metodo: String,
     pub url: String,
-    /// Status HTTP; 0 quando a requisição falhou.
+    /// 0 enquanto não há resposta.
     pub status: i64,
+    pub mime: String,
+    pub cabecalhos: Vec<(String, String)>,
+    pub enviado: Option<String>,
+    pub resposta: Option<String>,
+    /// A resposta passou de `MAX_CORPO` e foi cortada.
+    pub cortada: bool,
+    /// A resposta é binária (não guardada).
+    pub binaria: bool,
+    /// Bytes recebidos (`encodedDataLength`).
+    pub tamanho: u64,
+    pub inicio: Instant,
+    pub fim: Option<Instant>,
+    pub erro: Option<String>,
+}
+
+impl Chamada {
+    pub fn em_andamento(&self) -> bool {
+        self.fim.is_none()
+    }
+
+    fn bytes(&self) -> usize {
+        self.enviado.as_ref().map_or(0, String::len) + self.resposta.as_ref().map_or(0, String::len)
+    }
+}
+
+/// Corpo que o daemon precisa pedir ao navegador (`Network.getResponseBody`,
+/// `Network.getRequestPostData`).
+pub enum Buscar {
+    Resposta(String),
+    Enviado(String),
 }
 
 struct Atividade {
@@ -157,7 +231,6 @@ struct Atividade {
     site: Option<String>,
     pedidos: HashMap<String, Pedido>,
     ultima: Instant,
-    concluidas: VecDeque<Concluida>,
 }
 
 impl Atividade {
@@ -166,22 +239,84 @@ impl Atividade {
             site: None,
             pedidos: HashMap::new(),
             ultima: Instant::now(),
-            concluidas: VecDeque::new(),
         }
     }
 }
 
 #[derive(Default)]
+struct Chamadas {
+    lista: VecDeque<Chamada>,
+    prox: u64,
+    bytes: usize,
+}
+
+impl Chamadas {
+    fn achar(&mut self, aba: &str, id: &str) -> Option<&mut Chamada> {
+        self.lista.iter_mut().rev().find(|c| c.aba == aba && c.id == id)
+    }
+
+    fn incluir(&mut self, mut c: Chamada) {
+        if self.lista.len() >= MAX_CHAMADAS
+            && let Some(velha) = self.lista.pop_front()
+        {
+            self.bytes -= velha.bytes();
+        }
+        self.prox += 1;
+        c.n = self.prox;
+        self.bytes += c.bytes();
+        self.lista.push_back(c);
+        self.aparar();
+    }
+
+    /// Tira os corpos das chamadas mais antigas até a soma caber em `MAX_CORPOS_TOTAL`.
+    fn aparar(&mut self) {
+        for c in self.lista.iter_mut() {
+            if self.bytes <= MAX_CORPOS_TOTAL {
+                break;
+            }
+            self.bytes -= c.bytes();
+            c.enviado = None;
+            c.resposta = None;
+        }
+    }
+}
+
+/// Corta `s` em até `max` bytes, sem partir caractere. Devolve (texto, cortado).
+pub fn cortar_bytes(s: &str, max: usize) -> (String, bool) {
+    if s.len() <= max {
+        return (s.to_string(), false);
+    }
+    let mut i = max;
+    while !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    (s[..i].to_string(), true)
+}
+
+fn texto(mime: &str, url: &str) -> bool {
+    let m = mime.to_ascii_lowercase();
+    m.contains("json")
+        || m.starts_with("text/")
+        || m.contains("xml")
+        || m.contains("javascript")
+        || m.contains("x-www-form-urlencoded")
+        || url.split('?').next().unwrap_or("").ends_with(".json")
+}
+
+#[derive(Default)]
 pub struct Rede {
     abas: Mutex<HashMap<String, Atividade>>,
+    chamadas: Mutex<Chamadas>,
 }
 
 impl Rede {
-    pub fn evento(&self, alvo: &str, ev: &RawEvent) {
+    /// Atualiza o estado com um evento da aba `alvo` e diz quais corpos buscar.
+    pub fn evento(&self, alvo: &str, ev: &RawEvent) -> Vec<Buscar> {
         let p = &ev.params;
         let Some(id) = p.get("requestId").and_then(|v| v.as_str()) else {
-            return;
+            return Vec::new();
         };
+        let mut buscar = Vec::new();
         let mut abas = self.abas.lock().unwrap();
         let a = abas.entry(alvo.to_string()).or_insert_with(Atividade::nova);
         match ev.method.as_str() {
@@ -190,64 +325,167 @@ impl Rede {
                 // Documento de iframe: se o iframe é de outro site, ele termina na sessão do
                 // target dele, que não é acompanhada aqui; não entra na conta de rede ociosa.
                 let iframe = tipo == "Document" && p["frameId"].as_str() != Some(alvo);
-                let url = p["request"]["url"].as_str().unwrap_or("");
+                let req = &p["request"];
+                let url = req["url"].as_str().unwrap_or("");
                 if tipo == "Document" && !iframe {
                     a.site = Some(site_de(url));
                 }
                 // XHR/fetch de terceiros (anúncio, métricas, widgets) não conta; script e CSS de
                 // qualquer origem contam (é o código da página, às vezes num CDN de outro domínio).
-                let terceiro = matches!(tipo, "XHR" | "Fetch")
-                    && a.site.as_ref().is_some_and(|s| *s != site_de(url));
-                let ruido = terceiro || ruido(url);
+                let terceiro =
+                    matches!(tipo, "XHR" | "Fetch") && a.site.as_ref().is_some_and(|s| *s != site_de(url));
+                let eh_ruido = ruido(url);
                 a.pedidos.insert(
                     id.to_string(),
                     Pedido {
                         tipo: tipo.to_string(),
                         inicio: Instant::now(),
-                        metodo: p["request"]["method"].as_str().unwrap_or("GET").to_string(),
-                        url: p["request"]["url"].as_str().unwrap_or("").to_string(),
-                        status: 0,
-                        longo: iframe || ruido || !CONTAM.contains(&tipo),
+                        url: url.to_string(),
+                        longo: iframe || terceiro || eh_ruido || !CONTAM.contains(&tipo),
                     },
                 );
                 a.ultima = Instant::now();
+                drop(abas);
+
+                let mut ch = self.chamadas.lock().unwrap();
+                // Redirecionamento: mesmo requestId, URL nova.
+                if p.get("redirectResponse").is_some()
+                    && let Some(c) = ch.achar(alvo, id)
+                {
+                    c.url = url.to_string();
+                    return buscar;
+                }
+                if !GUARDA.contains(&tipo) || eh_ruido {
+                    return buscar;
+                }
+                let cabecalhos: Vec<(String, String)> = req["headers"]
+                    .as_object()
+                    .map(|m| {
+                        m.iter()
+                            .map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string()))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let enviado = req["postData"].as_str().map(|s| cortar_bytes(s, MAX_CORPO).0);
+                if enviado.is_none() && req["hasPostData"].as_bool() == Some(true) {
+                    buscar.push(Buscar::Enviado(id.to_string()));
+                }
+                ch.incluir(Chamada {
+                    n: 0,
+                    aba: alvo.to_string(),
+                    id: id.to_string(),
+                    tipo: tipo.to_string(),
+                    principal: tipo == "Document" && !iframe,
+                    metodo: req["method"].as_str().unwrap_or("GET").to_string(),
+                    url: url.to_string(),
+                    status: 0,
+                    mime: String::new(),
+                    cabecalhos,
+                    enviado,
+                    resposta: None,
+                    cortada: false,
+                    binaria: false,
+                    tamanho: 0,
+                    inicio: Instant::now(),
+                    fim: None,
+                    erro: None,
+                });
             }
             "Network.responseReceived" => {
                 if let Some(x) = a.pedidos.get_mut(id) {
-                    x.status = p["response"]["status"].as_i64().unwrap_or(0);
                     // Documento com resposta começada: o resto é o HTML chegando (às vezes em
                     // streaming por segundos); a espera passa a ser a do DOM parado.
                     if x.tipo == "Document" {
                         x.longo = true;
                     }
                 }
+                drop(abas);
+                if let Some(c) = self.chamadas.lock().unwrap().achar(alvo, id) {
+                    c.status = p["response"]["status"].as_i64().unwrap_or(0);
+                    c.mime = p["response"]["mimeType"].as_str().unwrap_or("").to_string();
+                }
             }
             "Network.loadingFinished" | "Network.loadingFailed" => {
-                if let Some(x) = a.pedidos.remove(id) {
-                    if !x.longo {
-                        tracing::debug!(
-                            "rede: {} {} {} em {} ms",
-                            x.tipo,
-                            x.metodo,
-                            x.url.chars().take(120).collect::<String>(),
-                            x.inicio.elapsed().as_millis()
-                        );
-                    }
-                    if a.concluidas.len() >= MAX_CONCLUIDAS {
-                        a.concluidas.pop_front();
-                    }
-                    let falhou = ev.method == "Network.loadingFailed";
-                    a.concluidas.push_back(Concluida {
-                        quando: Instant::now(),
-                        metodo: x.metodo,
-                        url: x.url,
-                        status: if falhou { 0 } else { x.status },
-                    });
+                if let Some(x) = a.pedidos.remove(id)
+                    && !x.longo
+                {
+                    tracing::debug!(
+                        "rede: {} {} em {} ms",
+                        x.tipo,
+                        x.url.chars().take(120).collect::<String>(),
+                        x.inicio.elapsed().as_millis()
+                    );
                 }
                 a.ultima = Instant::now();
+                drop(abas);
+                if let Some(c) = self.chamadas.lock().unwrap().achar(alvo, id) {
+                    c.fim = Some(Instant::now());
+                    if ev.method == "Network.loadingFailed" {
+                        let e = p["errorText"].as_str().unwrap_or("falhou");
+                        c.erro = Some(if p["canceled"].as_bool() == Some(true) {
+                            format!("cancelada ({e})")
+                        } else {
+                            e.to_string()
+                        });
+                    } else {
+                        c.tamanho = p["encodedDataLength"].as_f64().unwrap_or(0.0) as u64;
+                        if c.tipo != "Document"
+                            && texto(&c.mime, &c.url)
+                            && c.tamanho <= 20 * MAX_CORPO as u64
+                        {
+                            buscar.push(Buscar::Resposta(id.to_string()));
+                        } else if c.tipo != "Document" && !texto(&c.mime, &c.url) {
+                            c.binaria = true;
+                        }
+                    }
+                }
             }
             _ => {}
         }
+        buscar
+    }
+
+    /// Guarda a resposta de `Network.getResponseBody`.
+    pub fn com_resposta(&self, aba: &str, id: &str, corpo: &str, base64: bool) {
+        let mut ch = self.chamadas.lock().unwrap();
+        let Some(c) = ch.achar(aba, id) else { return };
+        if base64 {
+            c.binaria = true;
+            return;
+        }
+        let (t, cortado) = cortar_bytes(corpo, MAX_CORPO);
+        let antes = c.bytes();
+        c.resposta = Some(t);
+        c.cortada = cortado;
+        let depois = c.bytes();
+        ch.bytes = ch.bytes + depois - antes;
+        ch.aparar();
+    }
+
+    /// Guarda o corpo enviado de `Network.getRequestPostData`.
+    pub fn com_enviado(&self, aba: &str, id: &str, corpo: &str) {
+        let mut ch = self.chamadas.lock().unwrap();
+        let Some(c) = ch.achar(aba, id) else { return };
+        let antes = c.bytes();
+        c.enviado = Some(cortar_bytes(corpo, MAX_CORPO).0);
+        let depois = c.bytes();
+        ch.bytes = ch.bytes + depois - antes;
+        ch.aparar();
+    }
+
+    /// Roda `f` com as chamadas guardadas (da mais antiga para a mais nova).
+    pub fn com_chamadas<T>(&self, f: impl FnOnce(&VecDeque<Chamada>) -> T) -> T {
+        f(&self.chamadas.lock().unwrap().lista)
+    }
+
+    pub fn chamada(&self, n: u64) -> Option<Chamada> {
+        self.chamadas
+            .lock()
+            .unwrap()
+            .lista
+            .iter()
+            .find(|c| c.n == n)
+            .cloned()
     }
 
     /// (requisições em andamento, tempo desde a última atividade)
@@ -279,20 +517,18 @@ impl Rede {
             .unwrap_or_default()
     }
 
-    /// Primeira requisição concluída depois de `desde` com `trecho` na URL: "GET 200 url".
+    /// Primeira chamada da aba concluída depois de `desde` com `trecho` na URL: "#n GET 200 url".
     pub fn concluida_desde(&self, alvo: &str, desde: Instant, trecho: &str) -> Option<String> {
-        let abas = self.abas.lock().unwrap();
-        let c = abas
-            .get(alvo)?
-            .concluidas
-            .iter()
-            .find(|c| c.quando >= desde && c.url.contains(trecho))?;
-        let status = if c.status == 0 {
-            "falhou".to_string()
-        } else {
-            c.status.to_string()
-        };
-        Some(format!("{} {status} {}", c.metodo, c.url))
+        self.com_chamadas(|l| {
+            let c = l
+                .iter()
+                .find(|c| c.aba == alvo && c.fim.is_some_and(|f| f >= desde) && c.url.contains(trecho))?;
+            let status = match &c.erro {
+                Some(e) => format!("falhou ({e})"),
+                None => c.status.to_string(),
+            };
+            Some(format!("#{} {} {status} {}", c.n, c.metodo, c.url))
+        })
     }
 
     /// Esquece as requisições em andamento de uma aba (ao navegar, as da página anterior não
@@ -311,7 +547,7 @@ impl Rede {
 
 #[cfg(test)]
 mod testes {
-    use super::{ruido, site_de};
+    use super::{cortar_bytes, ruido, site_de};
 
     #[test]
     fn ruido_por_host() {
@@ -333,5 +569,11 @@ mod testes {
         assert_eq!(site_de("http://127.0.0.1:5000/x"), "127.0.0.1");
         assert_eq!(site_de("http://localhost:5000/x"), "localhost");
         assert_eq!(site_de("https://www.facebook.com/"), "facebook.com");
+    }
+
+    #[test]
+    fn corte_sem_partir_caractere() {
+        assert_eq!(cortar_bytes("ação", 2), ("a".to_string(), true));
+        assert_eq!(cortar_bytes("abc", 5), ("abc".to_string(), false));
     }
 }

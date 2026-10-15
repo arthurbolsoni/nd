@@ -44,7 +44,8 @@ async fn mapa_e_acoes() {
     }
     // Conteúdo do iframe de outro site, dentro do form dele (iframe > form > input).
     assert!(
-        mapa.lines().any(|l| l.starts_with("    e") && l.contains("input[text] \"CEP\"")),
+        mapa.lines()
+            .any(|l| l.starts_with("    e") && l.contains("input[text] \"CEP\"")),
         "{mapa}"
     );
     assert!(!mapa.contains("Tem certeza"), "diálogo fechado apareceu:\n{mapa}");
@@ -63,8 +64,14 @@ async fn mapa_e_acoes() {
     );
     assert_eq!(nd.ok(&["text", "--sel", "#eco"]).trim(), "Arthur Bolsoni");
     nd.ok(&["fill", "E-mail", "a@b.com"]);
-    tem(&nd.ok(&["pick", "Estado", "rio de"]), "escolhido \"Rio de Janeiro\"");
-    tem(&nd.ok(&["check", "Aceito os termos"]), "checkbox \"Aceito os termos\" [marcado]");
+    tem(
+        &nd.ok(&["pick", "Estado", "rio de"]),
+        "escolhido \"Rio de Janeiro\"",
+    );
+    tem(
+        &nd.ok(&["check", "Aceito os termos"]),
+        "checkbox \"Aceito os termos\" [marcado]",
+    );
     tem(&nd.ok(&["check", "Aceito os termos"]), "já estava marcado");
     tem(&nd.ok(&["check", "Aceito os termos", "--nao"]), "[desmarcado]");
     nd.ok(&["check", "Aceito os termos"]);
@@ -72,7 +79,10 @@ async fn mapa_e_acoes() {
     tem(&nd.ok(&["pick", "Escolha a cor", "verde"]), "escolhido \"Verde\"");
     let s = nd.ok(&["click", "Salvar"]);
     tem(&s, "texto novo:");
-    tem(&s, "enviado: Arthur Bolsoni / a@b.com / RJ / true / Santos / Verde");
+    tem(
+        &s,
+        "enviado: Arthur Bolsoni / a@b.com / RJ / true / Santos / Verde",
+    );
 
     let s = nd.ok(&["click", "Avisar"]);
     tem(&s, "diálogo alert \"Salvo!\" aceito");
@@ -120,7 +130,10 @@ async fn mapa_e_acoes() {
 
     nd.ok(&["fill", "Observações", "abc", "--sem-diff"]);
     nd.ok(&["key", "Control+a", "x", "--em", "Observações", "--sem-diff"]);
-    assert_eq!(nd.ok(&["eval", "document.getElementById('obs').value"]).trim(), "x");
+    assert_eq!(
+        nd.ok(&["eval", "document.getElementById('obs').value"]).trim(),
+        "x"
+    );
 
     let r = nd.run(&["click", "Botão que não existe"]);
     assert!(!r.status.success());

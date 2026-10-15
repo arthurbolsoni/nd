@@ -51,11 +51,15 @@ Commit `e6f836a` no fork.
 
 ## 4. Rede
 
-- [ ] Network em todas as abas, buffer 500, corpos JSON até 200 KB (já há as 500 últimas
-  concluídas por aba, sem corpo, usadas pelo `nd wait net`)
-- [ ] Filtro de imagem/fonte/analytics
-- [ ] `nd net` com forma do JSON
-- [ ] `nd api` via `fetch` na página
+- [x] Network em todas as abas, buffer 500, corpos até 200 KB (soma limitada a 40 MB)
+- [x] Filtro de imagem/fonte/anúncio/métricas/log
+- [x] `nd net` com forma do JSON, operação GraphQL, `--corpo`, `--caminho`, `--saida`; página
+  atual por padrão
+- [x] `nd api` via `fetch` na página: `--json`, `--set`, `--query`, `--metodo`, `--corpo`, `--saida`
+- [x] Resumo da rede na saída das ações
+- [x] Biblioteca: `attach` serializado (duas sessões no mesmo alvo quebravam `getResponseBody`)
+- [x] Testes: `tests/rede.rs` (página `rede.html`, APIs no servidor de teste) e unitários de forma,
+  JSON, caminho, form e corpo alterado
 
 ## 5. Receitas
 

@@ -166,6 +166,64 @@ enum Cmd {
         #[arg(long, default_value_t = 15)]
         max: u64,
     },
+    /// Chamadas XHR/fetch/documento capturadas: uma linha cada, com a forma do JSON.
+    Net {
+        /// Trecho da URL, método ou nome da operação (GraphQL).
+        filtro: Option<String>,
+        /// De todas as abas (padrão: a atual).
+        #[arg(long)]
+        todas: bool,
+        /// Quantas mostrar (as mais recentes).
+        #[arg(long, default_value_t = 30)]
+        ultimas: usize,
+        /// Só as feitas desde a última ação.
+        #[arg(long)]
+        novas: bool,
+        /// Inclui as das páginas anteriores da aba (padrão: só a página atual).
+        #[arg(long)]
+        antigas: bool,
+        /// Detalhe de uma chamada: corpo enviado e resposta.
+        #[arg(long)]
+        corpo: Option<u64>,
+        /// Parte da resposta JSON: data.itens, data.itens.0, data.itens[].nome
+        #[arg(long)]
+        caminho: Option<String>,
+        /// Máximo de caracteres da resposta.
+        #[arg(long, default_value_t = 4000)]
+        max: usize,
+        /// Grava a resposta (ou a parte do --caminho) neste arquivo.
+        #[arg(long)]
+        saida: Option<PathBuf>,
+    },
+    /// Refaz uma chamada capturada por fetch na página (cookies, origem e cabeçalhos do site).
+    Api {
+        /// Número da chamada em `nd net`.
+        n: u64,
+        /// Funde este JSON no corpo (num form, nos campos; campo com JSON dentro é fundido também).
+        #[arg(long)]
+        json: Option<String>,
+        /// Muda um valor do corpo: variables.count=20 (repetível).
+        #[arg(long)]
+        set: Vec<String>,
+        /// Muda um parâmetro da URL: pagina=2 (repetível).
+        #[arg(long)]
+        query: Vec<String>,
+        #[arg(long)]
+        metodo: Option<String>,
+        /// Corpo novo, inteiro.
+        #[arg(long)]
+        corpo: Option<String>,
+        #[arg(long)]
+        caminho: Option<String>,
+        #[arg(long, default_value_t = 4000)]
+        max: usize,
+        /// Grava a resposta (bytes, ou a parte do --caminho) neste arquivo.
+        #[arg(long)]
+        saida: Option<PathBuf>,
+    },
+    /// Comando CDP cru na aba atual (depuração): nd cdp Network.getResponseBody '{"requestId":"1.2"}'
+    #[command(hide = true)]
+    Cdp { metodo: String, params: Option<String> },
     /// Processo do daemon (usado pelo `nd start`).
     #[command(hide = true)]
     Daemon(Abertura),
@@ -238,6 +296,52 @@ fn main() -> ExitCode {
             json!({ "alvo": em, "teclas": teclas, "sem_diff": acao.sem_diff }),
             LONGO,
         ),
+        Cmd::Net {
+            filtro,
+            todas,
+            ultimas,
+            novas,
+            antigas,
+            corpo,
+            caminho,
+            max,
+            saida,
+        } => match absoluto(saida) {
+            Ok(saida) => comando(
+                "net",
+                json!({ "filtro": filtro, "todas": todas, "ultimas": ultimas, "novas": novas, "antigas": antigas,
+                        "corpo": corpo, "caminho": caminho, "max": max, "saida": saida }),
+                LONGO,
+            ),
+            Err(e) => Err(e),
+        },
+        Cmd::Api {
+            n,
+            json: j,
+            set,
+            query,
+            metodo,
+            corpo,
+            caminho,
+            max,
+            saida,
+        } => match absoluto(saida) {
+            Ok(saida) => comando(
+                "api",
+                json!({ "n": n, "json": j, "set": set, "query": query, "metodo": metodo,
+                        "corpo": corpo, "caminho": caminho, "max": max, "saida": saida }),
+                LONGO,
+            ),
+            Err(e) => Err(e),
+        },
+        Cmd::Cdp { metodo, params } => match params
+            .as_deref()
+            .map(serde_json::from_str::<serde_json::Value>)
+            .transpose()
+        {
+            Ok(p) => comando("cdp", json!({ "metodo": metodo, "params": p }), LONGO),
+            Err(e) => Err(format!("params: {e}")),
+        },
         Cmd::Wait {
             tipo,
             valor,
@@ -267,6 +371,13 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// Caminho absoluto (o daemon roda noutro diretório).
+fn absoluto(p: Option<PathBuf>) -> Result<Option<String>, String> {
+    p.map(|p| std::path::absolute(&p).map(|a| a.display().to_string()))
+        .transpose()
+        .map_err(|e| e.to_string())
 }
 
 /// Manda um comando ao daemon e imprime a saída.

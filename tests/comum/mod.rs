@@ -59,8 +59,49 @@ impl Drop for Nd {
     }
 }
 
+/// Lê uma requisição HTTP inteira: (método, caminho com query, cabeçalhos em minúsculas, corpo).
+async fn ler_requisicao(s: &mut tokio::net::TcpStream) -> (String, String, Vec<(String, String)>, Vec<u8>) {
+    let mut buf = Vec::new();
+    let mut pedaco = [0u8; 8192];
+    let fim_cab = loop {
+        let n = s.read(&mut pedaco).await.unwrap_or(0);
+        if n == 0 {
+            break buf.len();
+        }
+        buf.extend_from_slice(&pedaco[..n]);
+        if let Some(i) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+            break i + 4;
+        }
+    };
+    let cab = String::from_utf8_lossy(&buf[..fim_cab.min(buf.len())]).to_string();
+    let mut linhas = cab.lines();
+    let primeira = linhas.next().unwrap_or("");
+    let mut partes = primeira.split_whitespace();
+    let metodo = partes.next().unwrap_or("GET").to_string();
+    let caminho = partes.next().unwrap_or("/").to_string();
+    let cabecalhos: Vec<(String, String)> = linhas
+        .filter_map(|l| l.split_once(':'))
+        .map(|(k, v)| (k.trim().to_ascii_lowercase(), v.trim().to_string()))
+        .collect();
+    let tamanho: usize = cabecalhos
+        .iter()
+        .find(|(k, _)| k == "content-length")
+        .and_then(|(_, v)| v.parse().ok())
+        .unwrap_or(0);
+    let mut corpo = buf[fim_cab.min(buf.len())..].to_vec();
+    while corpo.len() < tamanho {
+        let n = s.read(&mut pedaco).await.unwrap_or(0);
+        if n == 0 {
+            break;
+        }
+        corpo.extend_from_slice(&pedaco[..n]);
+    }
+    (metodo, caminho, cabecalhos, corpo)
+}
+
 /// Serve `tests/fixtures` em 127.0.0.1 (a página com iframe de outro site o abre por
-/// `localhost`); `/api/lenta` responde depois de 1,5 s.
+/// `localhost`). APIs: `/api/lenta` (1,5 s), `/api/lista?pagina=N`, `/api/eco` (devolve método,
+/// query, corpo, `x-token` e cookie), `/api/stream` (dois JSON em sequência), `/arquivo.bin`.
 pub async fn servir() -> String {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let porta = listener.local_addr().unwrap().port();
@@ -72,18 +113,44 @@ pub async fn servir() -> String {
             };
             let raiz = raiz.clone();
             tokio::spawn(async move {
-                let mut buf = vec![0u8; 8192];
-                let n = s.read(&mut buf).await.unwrap_or(0);
-                let req = String::from_utf8_lossy(&buf[..n]);
-                let caminho = req.split_whitespace().nth(1).unwrap_or("/").to_string();
-                let (status, tipo, corpo): (&str, &str, Vec<u8>) = if caminho == "/api/lenta" {
-                    tokio::time::sleep(Duration::from_millis(1500)).await;
-                    ("200 OK", "application/json", br#"{"valor":42}"#.to_vec())
-                } else {
-                    match std::fs::read(raiz.join(caminho.trim_start_matches('/'))) {
+                let (metodo, caminho, cab, corpo_req) = ler_requisicao(&mut s).await;
+                let (rota, query) = caminho.split_once('?').unwrap_or((&caminho, ""));
+                let json = "application/json";
+                let (status, tipo, corpo): (&str, &str, Vec<u8>) = match rota {
+                    "/api/lenta" => {
+                        tokio::time::sleep(Duration::from_millis(1500)).await;
+                        ("200 OK", json, br#"{"valor":42}"#.to_vec())
+                    }
+                    "/api/lista" => {
+                        let pagina: i64 = query
+                            .split('&')
+                            .find_map(|p| p.strip_prefix("pagina="))
+                            .and_then(|v| v.parse().ok())
+                            .unwrap_or(1);
+                        let v = serde_json::json!({
+                            "itens": [{"id": 1, "nome": "a"}, {"id": 2, "nome": "b"}, {"id": 3, "nome": "c"}],
+                            "pagina": pagina,
+                            "total": 9,
+                        });
+                        ("200 OK", json, v.to_string().into_bytes())
+                    }
+                    "/api/eco" => {
+                        let h = |n: &str| cab.iter().find(|(k, _)| k == n).map(|(_, v)| v.clone());
+                        let v = serde_json::json!({
+                            "metodo": metodo,
+                            "query": query,
+                            "corpo": String::from_utf8_lossy(&corpo_req),
+                            "token": h("x-token"),
+                            "cookie": h("cookie"),
+                        });
+                        ("200 OK", json, v.to_string().into_bytes())
+                    }
+                    "/api/stream" => ("200 OK", json, b"{\"a\":1}\n{\"b\":[1,2]}\n".to_vec()),
+                    "/arquivo.bin" => ("200 OK", "application/octet-stream", (0u8..=255).collect()),
+                    _ => match std::fs::read(raiz.join(rota.trim_start_matches('/'))) {
                         Ok(b) => ("200 OK", "text/html; charset=utf-8", b),
                         Err(_) => ("404 Not Found", "text/plain", b"404".to_vec()),
-                    }
+                    },
                 };
                 let cab = format!(
                     "HTTP/1.1 {status}\r\nContent-Type: {tipo}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",

@@ -20,6 +20,9 @@ nd check <alvo> [--nao]             checkbox, radio, switch
 nd upload <alvo> <arquivo>...       input de arquivo ou botão que abre o seletor
 nd key <tecla>... [--em ALVO]       Enter, Tab, Escape, Control+a, Shift+Tab...
 nd wait text|sel|url|net <valor> [--sumir] [--max S]
+nd net [filtro] [--novas] [--antigas] [--todas] [--ultimas N]
+nd net --corpo N [--caminho a.b[].c] [--max N] [--saida ARQ]
+nd api N [--json '{...}'] [--set a.b=v]... [--query k=v]... [--caminho ...] [--saida ARQ]
 nd tabs                             lista as abas (* = atual)
 nd tab <n|trecho>                   escolhe a aba atual
 nd eval '<js>' | -f arq.js          JavaScript na aba atual
@@ -33,6 +36,11 @@ nd stop
 - Ações imprimem o que mudou: `+` elemento novo, `-` sumiu, `~` mudou, `texto novo:`, avisos,
   diálogos aceitos, ou `página nova` com o mapa. `--sem-diff` não lê a página depois.
 - `wait net` considera as requisições concluídas desde a última ação.
+- `nd net`: chamadas XHR/fetch/documento da página atual, uma por linha, com a forma do JSON da
+  resposta e o nome da operação GraphQL:
+  `#3 GET 200 /w/rest.php/v1/search/title?q=Recife 1.7 KB 30 ms → {pages: [{id: num, title: str, …} ×10]}`
+- `nd api N` refaz a chamada `#N` por `fetch` dentro da página (cookies e origem do site), com o
+  corpo ou a URL alterados.
 
 Exemplo de mapa:
 

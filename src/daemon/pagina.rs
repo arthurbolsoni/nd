@@ -728,7 +728,10 @@ pub fn diferenca(antes: &Instantaneo, depois: &Instantaneo) -> String {
             out.push(format!("  {l}"));
         }
         if texto_novo.len() > MAX_TEXTO {
-            out.push(format!("  … mais {} linhas (nd text)", texto_novo.len() - MAX_TEXTO));
+            out.push(format!(
+                "  … mais {} linhas (nd text)",
+                texto_novo.len() - MAX_TEXTO
+            ));
         }
     }
     let mut foram: Vec<String> = Vec::new();
