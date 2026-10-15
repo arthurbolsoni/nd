@@ -90,6 +90,6 @@ Commit `e6f836a` no fork.
 
 ## 8. Aceitação
 
-- [ ] Tarefa do zero com `nd` no Facebook
-- [ ] Atlas gravado, repetição com `nd run`
-- [ ] Contagem de chamadas de ferramenta: método atual × `nd`
+- [x] Tarefa do zero com `nd` no Facebook (Marketplace, 20 anúncios de bicicleta até R$ 800)
+- [x] Atlas gravado (`~/nodriver/sites/www.facebook.com.yaml`), repetição com `nd run` (geladeira)
+- [x] Contagem de chamadas de ferramenta: método atual × `nd` (ANOTACOES, fase 8)

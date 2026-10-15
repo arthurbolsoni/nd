@@ -162,6 +162,12 @@ fn ruido(url: &str) -> bool {
     RUIDO_HOST.iter().any(|d| host.contains(d)) || host.split('.').any(|l| RUIDO_ROTULO.contains(&l))
 }
 
+/// Carregamento de código que entra na espera mas não é dado para `nd net`: módulos do
+/// Facebook (`/ajax/bootloader-endpoint`).
+fn fora_do_buffer(url: &str) -> bool {
+    url.contains("/ajax/bootloader-endpoint")
+}
+
 /// Requisição aberta há mais que isto deixa de segurar a espera (streaming, long-poll).
 const VELHA: Duration = Duration::from_secs(5);
 /// Chamadas guardadas (todas as abas).
@@ -357,7 +363,7 @@ impl Rede {
                     c.url = url.to_string();
                     return buscar;
                 }
-                if !GUARDA.contains(&tipo) || eh_ruido {
+                if !GUARDA.contains(&tipo) || eh_ruido || fora_do_buffer(url) {
                     return buscar;
                 }
                 let cabecalhos: Vec<(String, String)> = req["headers"]

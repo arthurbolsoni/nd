@@ -328,3 +328,33 @@
   `eval` saem inteiros). `open` no replay não imprime o mapa.
 - Passo com `confirmar` para o replay com saída de sucesso e o comando de retomada; o agente pede
   o ok ao usuário e roda `--desde N --confirmado`.
+
+## 2026-10-15 — fase 8 (aceitação no Facebook)
+
+Tarefa: no Marketplace, "bicicleta" em Bento Gonçalves (raio 25 km), até R$ 800, 20 primeiros
+anúncios com título, preço, local e link. Perfil `~/nodriver/profile-edge`, Edge visível, conta
+logada pelo usuário antes do teste.
+
+| Rodada | Chamadas de ferramenta | Tempo do navegador | Observação |
+|---|---|---|---|
+| `nd` do zero | 7 | ~10 s por página | 3 chamadas procurando a API de paginação (não há: a primeira página vem no HTML); 2 `eval` até acertar a extração (selo "Acabou de chegar", preço riscado, "Gratuito") |
+| Método antigo (subagente, Python + `lib.py`) | 3 | ~10 s | prompt já trazia o que a rodada do `nd` descobriu (localização salva na conta, formato do link, primeira página sem rolar); o JSON final foi montado pelo LLM a partir do texto bruto, com acentos corrigidos à mão (stdout do Windows) |
+| `nd run facebook buscar_marketplace -p termo=geladeira` | 1 | 8,9 s | JSON pronto saído do passo `eval` do atlas, sem LLM no meio |
+
+- A comparação do zero não é equivalente: a linha de base recebeu no prompt os achados da rodada
+  do `nd`. A diferença medida está na repetição: 1 chamada com saída estruturada, contra script
+  novo + montagem manual.
+- Deslogado, o Marketplace abre um popup de login com e-mail e senha salvos no perfil; o `nd` não
+  entrou na conta (anotado como armadilha no atlas).
+- O `fechar.ps1` rodado pelo subagente no fim derrubou o Edge de um `cargo test` que rodava em
+  paralelo; o teste falhou e passou ao repetir. Dois agentes usando automação ao mesmo tempo
+  precisam combinar quem fecha.
+
+### Ajustes e pendências vistos no teste
+
+- `/ajax/bootloader-endpoint` (módulos do Facebook) saiu do buffer do `nd net`; continua contando
+  na espera de rede.
+- `LSPlatformGraphQLLightspeedRequestQuery` (sincronização do Messenger) aparece em toda página
+  do Facebook e polui `nd net graphql`.
+- Falta um comando de rolagem (`mouseWheel` por CDP): `window.scrollTo` e a tecla End (com o foco
+  na busca) não dispararam a paginação infinita.
