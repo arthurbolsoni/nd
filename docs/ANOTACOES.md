@@ -80,3 +80,19 @@
   `aria-label`, `placeholder`, `title`, `value`, `alt`, incluindo shadow DOM aberto.
 - Testes: `cargo test -p nodriver` (13 testes, ~20 s em paralelo). `NODRIVER_HEADFUL=1` mostra
   as janelas.
+
+## 2026-10-15 — reconexão e screenshot
+
+- Websocket caído com o navegador vivo: a conexão reabre em segundo plano (até 3 tentativas)
+  e anexa sessão nova a cada aba registrada. `Tab` busca a sessão atual na conexão, então a
+  mesma `Tab` continua valendo.
+- Inscrições por aba e as globais continuam recebendo eventos; inscrição presa a um session id
+  cru para de receber. Evento sintético `Nodriver.reconnected` com `{generation}`.
+- Comando em andamento na queda volta `Disconnected` e não é reenviado (o navegador pode ter
+  executado). `Page.enable` é reenviado na sessão nova; outros domínios ativados pelo chamador
+  (ex.: `Network.enable`) precisam ser ativados de novo. O daemon do `nd` deve escutar
+  `Nodriver.reconnected` e reativar `Network` para não perder a captura de rede.
+- Navegador morto: as tentativas falham, os streams terminam e as chamadas voltam
+  `Disconnected`.
+- `Browser::close` desliga a reconexão antes de fechar.
+- Testes: 13 (browser) + 3 (reconexão) + 1 (screenshot), estáveis em 3 rodadas paralelas.

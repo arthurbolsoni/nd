@@ -16,10 +16,10 @@ Commit `e6f836a` no fork.
 - [x] Workspace Cargo na raiz do fork; crates `nodriver`, `nodriver-cdp` e `cdp-gen`
 - [x] Gerador de tipos CDP a partir de `browser_protocol.json` / `js_protocol.json` (equivalente ao `generate_cdp.py`): Browser, Target, Page, Runtime, DOM, Input, Network, Emulation, Fetch, Storage, Security, Log, IO e os referenciados (Debugger)
 - [x] `connection`: websocket, ids, respostas, eventos tipados e crus por sessão, timeout
-- [ ] `connection`: reconexão
+- [x] `connection`: reconexão automática (commit `3346916` no fork)
 - [x] `config`: flags do `config.py`, perfil, idioma, porta, headless, executável (Chrome, Edge como alternativa)
 - [x] `browser`: lançar, porta por `DevToolsActivePort`, conectar em navegador já aberto, targets, `get`, `close`, perfil em uso, pid do navegador
-- [x] `tab`: `evaluate` (await_promise, return_by_value), `select` com espera, `find` por texto (com shadow DOM), espera de carregamento, `activate`, teclas, mouse, screenshot
+- [x] `tab`: `evaluate` (await_promise, return_by_value), `select` com espera, `find` por texto (com shadow DOM), espera de carregamento, `activate`, teclas, mouse, screenshot (testado: PNG no tamanho do viewport)
 - [x] `element`: caixa, `scroll_into_view`, `mouse_click`, `click`, `send_keys`, `clear_input`, `send_file`, `select_option`, `apply`
 - [x] Testes contra páginas locais (13 testes de integração, Edge headless, perfil temporário)
 - [x] README do fork descrevendo o crate
