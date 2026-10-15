@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="pt-BR">
+<head><meta charset="utf-8"><title>Entrar em duas etapas</title></head>
+<body>
+<main id="area">
+  <!-- Como o gov.br: usuário numa tela, senha na outra, ambos com autocomplete="new-password". -->
+  <form id="etapa1">
+    <label for="conta">CPF</label>
+    <input id="conta" name="accountId" type="tel" autocomplete="new-password">
+    <button type="submit">Continuar</button>
+  </form>
+</main>
+<script>
+  const area = document.getElementById('area');
+  document.getElementById('etapa1').addEventListener('submit', (ev) => {
+    ev.preventDefault();
+    const conta = document.getElementById('conta').value;
+    area.innerHTML = '<form id="etapa2"><h3>Digite sua senha</h3>'
+      + '<label for="password">Senha</label>'
+      + '<input id="password" name="password" type="password" autocomplete="new-password">'
+      + '<button type="submit">Entrar</button></form>';
+    // ?pre=1 faz o papel do preenchimento do navegador.
+    if (location.search.includes('pre=1')) document.getElementById('password').value = 'segredo123';
+    document.getElementById('etapa2').addEventListener('submit', async (e2) => {
+      e2.preventDefault();
+      const fd = new URLSearchParams({ accountId: conta, password: document.getElementById('password').value });
+      await fetch('/api/eco?etapa=2', { method: 'POST', body: fd });
+      area.innerHTML = '<h1>Portal Logado</h1><p id="ok">conta ' + conta + '</p>';
+    });
+  });
+</script>
+</body>
+</html>

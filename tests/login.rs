@@ -72,5 +72,36 @@ async fn login_com_senha_preenchida() {
     tem(&rascunho, "valor: '{senha}'");
     nao_tem(&rascunho, "outra-senha");
 
+    // Duas etapas com autocomplete="new-password" (como o gov.br): usuário na primeira tela,
+    // senha na segunda; a dica do campo é trocada antes de pedir a sugestão.
+    nd.ok(&["open", &format!("{base}/login2.html?pre=1"), "--sem-map"]);
+    let r = nd.run(&["login"]);
+    assert!(!r.status.success());
+    tem(&String::from_utf8_lossy(&r.stderr), "nd login --usuario");
+    let s = nd.ok(&[
+        "login",
+        "--usuario",
+        "12345678909",
+        "--checar",
+        "!!document.getElementById('ok')",
+    ]);
+    tem(&s, "usuário preenchido na primeira etapa");
+    tem(&s, "tela da senha aberta");
+    tem(&s, "enviado por clique em");
+    tem(&s, "login ok (login.checar deu true)");
+    tem(&nd.ok(&["text", "--sel", "#ok"]), "conta 12345678909");
+    // Já logado: nada a fazer.
+    let s = nd.ok(&["login", "--checar", "!!document.getElementById('ok')"]);
+    tem(&s, "já logado; nada enviado");
+    // Sem senha salva: troca a dica, recria o campo e desiste sem enviar.
+    nd.ok(&["open", &format!("{base}/login2.html"), "--sem-map"]);
+    let r = nd.run(&["login", "--usuario", "12345678909"]);
+    assert!(!r.status.success());
+    tem(&String::from_utf8_lossy(&r.stderr), "o Edge não preencheu senha");
+    assert!(
+        nd.ok(&["net", "etapa=2"]).contains("nenhuma chamada"),
+        "enviou sem senha"
+    );
+
     nd.ok(&["stop"]);
 }

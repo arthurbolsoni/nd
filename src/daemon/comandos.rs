@@ -120,6 +120,7 @@ async fn executar_cmd(d: &Arc<Daemon>, p: &Pedido) -> R {
             let acao = Acao::Login {
                 enviar: x.enviar,
                 checar: x.checar,
+                usuario: x.usuario,
             };
             acoes::agir(d, x.base, acao).await
         }
@@ -292,6 +293,7 @@ struct LoginArgs {
     base: AcaoArgs,
     enviar: Option<String>,
     checar: Option<String>,
+    usuario: Option<String>,
 }
 
 #[derive(Deserialize)]

@@ -346,8 +346,13 @@ impl Rede {
                 let iframe = tipo == "Document" && p["frameId"].as_str() != Some(alvo);
                 let req = &p["request"];
                 let url = req["url"].as_str().unwrap_or("");
-                if tipo == "Document" && !iframe {
+                if tipo == "Document" && !iframe && sub.is_none() {
                     a.site = Some(site_de(url));
+                    // Página nova: o que o documento anterior deixou aberto (ex.: a nova guia do
+                    // Edge ainda carregando) não conta mais.
+                    if p.get("redirectResponse").is_none() {
+                        a.pedidos.retain(|k, _| k == id);
+                    }
                 }
                 // XHR/fetch de terceiros (anúncio, métricas, widgets) não conta; script e CSS de
                 // qualquer origem contam (é o código da página, às vezes num CDN de outro domínio).

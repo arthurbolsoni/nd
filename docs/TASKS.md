@@ -146,4 +146,9 @@ Commit `051992e` no fork.
 - [x] Senha mascarada (`••••`, sem o tamanho) no mapa, nas notas do `fill`, no `nd net`/`nd api`
   (form, JSON, multipart, query) e no rascunho do atlas (`{senha}`)
 - [x] Testes: `tests/login.rs` (página `login.html`) e unitário de máscara
-- [ ] Conferência com senha salva de verdade no Edge com janela
+- [x] Conferência com senha salva de verdade: gov.br, Edge com janela, `profile-edge`
+  (2026-10-15), login inteiro num comando
+- [x] `--usuario` (login em duas etapas), campo `new-password`/`off` (dica trocada, campo
+  recriado), Enter da sugestão que já envia, "já logado" com `--checar`
+- [x] Atlas `~/nodriver/sites/acesso.gov.br.yaml` (fluxo `entrar`, parâmetro `cpf`)
+- [x] Teste de duas etapas com `new-password` (`login2.html`)

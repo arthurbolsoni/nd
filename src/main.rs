@@ -164,6 +164,9 @@ enum Cmd {
         /// JavaScript que dá true quando logado (o login.checar do atlas).
         #[arg(long)]
         checar: Option<String>,
+        /// Login em duas etapas: usuário (CPF, e-mail) digitado na primeira tela.
+        #[arg(long)]
+        usuario: Option<String>,
         #[command(flatten)]
         acao: OpAcao,
     },
@@ -393,9 +396,14 @@ fn main() -> ExitCode {
             json!({ "alvo": dentro, "subir": subir, "vezes": vezes, "fim": fim, "sem_diff": acao.sem_diff }),
             ESPERA_SCROLL,
         ),
-        Cmd::Login { enviar, checar, acao } => comando(
+        Cmd::Login {
+            enviar,
+            checar,
+            usuario,
+            acao,
+        } => comando(
             "login",
-            json!({ "enviar": enviar, "checar": checar, "sem_diff": acao.sem_diff }),
+            json!({ "enviar": enviar, "checar": checar, "usuario": usuario, "sem_diff": acao.sem_diff }),
             LONGO,
         ),
         Cmd::Key { teclas, em, acao } => comando(

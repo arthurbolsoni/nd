@@ -713,7 +713,11 @@
     return false;
   }
 
-  const ENVIAR = /^(entrar|login|log in|sign in|signin|acessar|continuar|continue|next|avançar|próximo|prosseguir|ok)$/i;
+  const ENVIAR = /(^|[^\p{L}])(entrar|login|log in|sign in|signin|acessar|continuar|continue|next|avançar|próximo|prosseguir|ok)([^\p{L}]|$)/iu;
+  const enviaTexto = (b) => {
+    const t = norm(b.innerText || b.value || b.getAttribute('aria-label'));
+    return t.length <= 60 && ENVIAR.test(t);
+  };
 
   // Formulário de login do quadro: o primeiro campo de senha visível, o campo de usuário antes
   // dele e o botão de envio. Diz se cada campo tem valor (ou foi preenchido pelo navegador) sem
@@ -732,9 +736,10 @@
     const usuario = antes[antes.length - 1] || null;
     const botoes = [...caixa.querySelectorAll('button, input[type=submit], input[type=image], [role=button]')].filter(vis);
     const botao = botoes.find((b) => b.type === 'submit' && b.form === senha.form && senha.form)
-      || botoes.find((b) => ENVIAR.test(norm(b.innerText || b.value || b.getAttribute('aria-label'))))
+      || botoes.find(enviaTexto)
       || null;
     const tem = (el) => !!el && (el.value.length > 0 || autopreenchido(el));
+    const ac = (el) => (el && el.getAttribute('autocomplete')) || '';
     return {
       achou: true,
       prox,
@@ -746,7 +751,48 @@
       usuarioOk: !usuario || tem(usuario),
       senhaAuto: autopreenchido(senha),
       usuarioAuto: !!usuario && autopreenchido(usuario),
+      bloqueado: /new-password|off/i.test(ac(senha)) || /new-password|off/i.test(ac(usuario)),
     };
+  }
+
+  // Primeira etapa de login em duas telas (usuário, depois senha): um formulário com um campo de
+  // texto/e-mail/telefone visível e um botão de continuar.
+  function etapaUsuario(a) {
+    ajustarProx(a);
+    const vis = (el) => !el.disabled && visivel(el, el.getBoundingClientRect());
+    for (const f of todos('form')) {
+      const campos = [...f.querySelectorAll('input')].filter((el) => {
+        const t = (el.getAttribute('type') || 'text').toLowerCase();
+        return ['text', 'email', 'tel', ''].includes(t) && vis(el);
+      });
+      if (campos.length !== 1) continue;
+      const botoes = [...f.querySelectorAll('button, input[type=submit], [role=button]')].filter(vis);
+      const botao = botoes.find(enviaTexto) || botoes.find((b) => b.type === 'submit') || null;
+      return { achou: true, prox, usuario: refPara(campos[0]), botao: botao && refPara(botao) };
+    }
+    return { achou: false, prox };
+  }
+
+  // Site que marca o login com autocomplete="new-password"/"off" (gov.br) faz o navegador não
+  // oferecer a senha salva. A dica vira current-password/username; com `clonar`, o campo é
+  // recriado para o navegador analisar o formulário de novo.
+  function liberarSenhaSalva(a) {
+    ajustarProx(a);
+    const senha = exigir(a.senha);
+    const usuario = a.usuario ? achar(a.usuario) : null;
+    let mudou = false;
+    for (const [el, dica] of [[senha, 'current-password'], [usuario, 'username']]) {
+      if (el && /new-password|off/i.test(el.getAttribute('autocomplete') || '')) {
+        el.setAttribute('autocomplete', dica);
+        mudou = true;
+      }
+    }
+    let novo = senha;
+    if (a.clonar) {
+      novo = senha.cloneNode(true);
+      senha.replaceWith(novo);
+    }
+    return { mudou, senha: refPara(novo), prox };
   }
 
   function melhor(texto, candidatos) {
@@ -967,6 +1013,6 @@
     achar: (a) => !!achar(a.ref),
     doc: () => meuDoc,
     mapa, localizar, ponto, caixaQuadro, tipo, preparar, definir, estado, escolher, opcoes,
-    clicarJs, focar, temTexto, api, temSel, porTexto, quieto, formLogin, rolagem,
+    clicarJs, focar, temTexto, api, temSel, porTexto, quieto, formLogin, etapaUsuario, liberarSenhaSalva, rolagem,
   };
 })()

@@ -79,7 +79,7 @@ Partes do `nd`:
 | `nd fill <ref> "valor"` | preenche campo, com tratamento de input controlado (React) |
 | `nd pick <ref> "opção"` | select nativo, combobox, autocomplete |
 | `nd check <ref>` / `nd upload <ref> <arq>` / `nd key <tecla>` | checkbox, upload, teclas |
-| `nd login [--enviar <alvo>] [--checar <js>]` | login com a senha salva no Edge; o nd só envia e confere |
+| `nd login [--usuario <cpf/e-mail>] [--enviar <alvo>] [--checar <js>]` | login com a senha salva no Edge; o nd só envia e confere |
 | `nd scroll [--vezes N] [--fim] [--dentro <alvo>] [--subir]` | rola com o gesto de rolagem do navegador; mostra rede e itens novos; `--fim` até parar de crescer |
 | `nd wait text\|sel\|url\|net <x>` | espera explícita |
 | `nd eval '<js>'` / `nd eval -f arq.js` | JS livre |
@@ -181,8 +181,8 @@ fluxos:
 - Passos por nome (o texto que o `nd` aceita como alvo), não por ref; `nome` vale como `alvo`.
 - Ações: `open`, `click`, `fill`, `pick`, `check`, `upload`, `key`, `scroll`, `wait`/`esperar`, `download`,
   `eval`, `text`, `tab`, `pdf`, `login`, com os mesmos campos das opções da linha de comando.
-- `login: {}`, `login: Entrar` (botão) ou `{enviar, checar}`; sem `checar`, usa o `login.checar`
-  do atlas.
+- `login: {}`, `login: Entrar` (botão) ou `{usuario, enviar, checar}`; sem `checar`, usa o
+  `login.checar` do atlas; `usuario: "{cpf}"` para login em duas etapas.
 - `scroll: 3` (vezes), `scroll: fim` ou mapa `{vezes, fim, dentro, subir}`; `vezes` aceita `"{param}"`.
 - `opcional: true`: falha não para o fluxo. `confirmar: true`: o replay para antes do passo.
 - `open` com caminho (`/x`) vai para `https://<site>/x`.

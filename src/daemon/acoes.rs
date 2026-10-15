@@ -750,6 +750,7 @@ pub enum Acao {
     Login {
         enviar: Option<String>,
         checar: Option<String>,
+        usuario: Option<String>,
     },
 }
 
@@ -811,7 +812,24 @@ pub async fn agir(d: &Arc<Daemon>, a: AcaoArgs, acao: Acao) -> R {
     let notas = match (&acao, &alvo) {
         (Acao::Key { teclas: t }, al) => teclas(d, &tab, al.as_ref(), t).await,
         (Acao::Scroll { subir, vezes, fim }, al) => rolar(d, &tab, al.as_ref(), *subir, *vezes, *fim).await,
-        (Acao::Login { enviar, .. }, _) => logar(d, &tab, &antes, enviar.as_deref()).await,
+        (
+            Acao::Login {
+                enviar,
+                usuario,
+                checar,
+            },
+            _,
+        ) => {
+            logar(
+                d,
+                &tab,
+                &antes,
+                enviar.as_deref(),
+                usuario.as_deref(),
+                checar.as_deref(),
+            )
+            .await
+        }
         (_, None) => Err("informe o alvo (ref ou texto)".into()),
         (Acao::Click { js }, Some(al)) => clicar(d, &tab, al, *js).await,
         (Acao::Fill { valor, teclas }, Some(al)) => preencher(d, &tab, al, valor, *teclas).await,
@@ -920,43 +938,81 @@ async fn logar(
     tab: &Tab,
     inst: &Instantaneo,
     enviar: Option<&str>,
+    usuario: Option<&str>,
+    checar: Option<&str>,
 ) -> Result<Vec<String>, String> {
-    let mut f = achar_login(d, tab).await?.ok_or(
-        "nenhum campo de senha visível; em login de duas etapas, avance o usuário (nd click) e rode nd login de novo",
-    )?;
     let mut notas = Vec::new();
+    let mut f = match achar_login(d, tab).await? {
+        Some(f) => f,
+        // Sessão já aberta: nada a fazer (fluxo do atlas rodando logado).
+        None if checar.is_some() && tab.evaluate(checar.unwrap_or("")).await.ok() == Some(json!(true)) => {
+            return Ok(vec!["já logado; nada enviado".into()]);
+        }
+        None => {
+            let Some(u) = usuario else {
+                return Err(
+                    "nenhum campo de senha visível; em login de duas etapas (usuário numa tela, \
+                            senha na outra), use nd login --usuario <cpf ou e-mail>"
+                        .into(),
+                );
+            };
+            notas.extend(primeira_etapa(d, tab, u).await?);
+            achar_login(d, tab).await?.ok_or(
+                "depois do usuário não apareceu campo de senha (usuário recusado, captcha ou verificação?)",
+            )?
+        }
+    };
     let ok = |v: &Value| v["senhaOk"] == json!(true) && v["usuarioOk"] == json!(true);
     if ok(&f.v) {
         notas.push("usuário e senha já preenchidos (pelo Edge ou pela página)".into());
     } else {
-        // Sugestão do gerenciador de senhas: clicar no campo abre a lista; seta e Enter escolhem
-        // a primeira credencial salva.
-        let campos: Vec<String> = [&f.v["usuario"], &f.v["senha"]]
-            .iter()
-            .filter_map(|x| x.as_str().map(str::to_string))
-            .collect();
-        for r in campos {
-            clicar(d, tab, &alvo_em(&f.q, &r), false).await?;
-            tokio::time::sleep(Duration::from_millis(500)).await;
-            tab.press_key("ArrowDown").await.map_err(e)?;
-            tokio::time::sleep(Duration::from_millis(300)).await;
-            // Com a sugestão destacada, o Edge mostra a prévia e o campo fica `:autofill`. Sem
-            // prévia não há lista aberta, e o Enter enviaria o formulário vazio: Escape.
-            let previa = achar_login(d, tab)
-                .await?
-                .is_some_and(|g| g.v["usuarioAuto"] == json!(true) || g.v["senhaAuto"] == json!(true));
-            tab.press_key(if previa { "Enter" } else { "Escape" })
-                .await
-                .map_err(e)?;
-            tokio::time::sleep(Duration::from_millis(500)).await;
-            if let Some(g) = achar_login(d, tab).await? {
-                f = g;
+        // Sugestão do gerenciador de senhas. Campo marcado new-password/off: primeiro troca a
+        // dica, depois recria o campo, para o Edge oferecer a senha salva.
+        let mut enviado = false;
+        let mut preenchido = false;
+        let bloqueado = f.v["bloqueado"] == json!(true);
+        for etapa in 0..3 {
+            if etapa > 0 {
+                if !bloqueado {
+                    continue;
+                }
+                js_ref(
+                    d,
+                    tab.target_id(),
+                    &f.q,
+                    "liberarSenhaSalva",
+                    json!({ "senha": f.v["senha"], "usuario": f.v["usuario"], "clonar": etapa == 2 }),
+                )
+                .await?;
+                notas.push(if etapa == 1 {
+                    "o site marca o login com autocomplete new-password/off; dica trocada para current-password".into()
+                } else {
+                    "campo de senha recriado para o Edge oferecer a senha salva".into()
+                });
+                if let Some(g) = achar_login(d, tab).await? {
+                    f = g;
+                }
             }
-            if ok(&f.v) {
-                break;
+            match sugestao(d, tab, &f).await? {
+                Sugestao::Enviou => {
+                    enviado = true;
+                    break;
+                }
+                Sugestao::Preencheu(g) => {
+                    f = g;
+                    if ok(&f.v) {
+                        preenchido = true;
+                        break;
+                    }
+                }
+                Sugestao::Nada(g) => f = g,
             }
         }
-        if !ok(&f.v) {
+        if enviado {
+            notas.push("senha salva escolhida na sugestão do Edge; o Enter já enviou o formulário".into());
+            return Ok(notas);
+        }
+        if !preenchido {
             let falta = match (f.v["usuarioOk"] == json!(true), f.v["senhaOk"] == json!(true)) {
                 (false, false) => "usuário e senha",
                 (false, true) => "usuário",
@@ -998,6 +1054,86 @@ async fn logar(
     Ok(notas)
 }
 
+enum Sugestao {
+    /// O formulário sumiu: o Enter que escolheu a sugestão também enviou.
+    Enviou,
+    Preencheu(FormLogin),
+    Nada(FormLogin),
+}
+
+/// Clica no campo de usuário (depois no de senha), seta para baixo e, só se o Edge mostrou a
+/// prévia de uma credencial salva (campo `:autofill`), Enter. Sem prévia não há lista aberta, e o
+/// Enter enviaria o formulário vazio: Escape.
+async fn sugestao(d: &Arc<Daemon>, tab: &Tab, f: &FormLogin) -> Result<Sugestao, String> {
+    let campos: Vec<String> = [&f.v["usuario"], &f.v["senha"]]
+        .iter()
+        .filter_map(|x| x.as_str().map(str::to_string))
+        .collect();
+    let mut atual = FormLogin {
+        q: f.q.clone(),
+        v: f.v.clone(),
+    };
+    for r in campos {
+        clicar(d, tab, &alvo_em(&atual.q, &r), false).await?;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        tab.press_key("ArrowDown").await.map_err(e)?;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let previa = achar_login(d, tab)
+            .await?
+            .is_some_and(|g| g.v["usuarioAuto"] == json!(true) || g.v["senhaAuto"] == json!(true));
+        tab.press_key(if previa { "Enter" } else { "Escape" })
+            .await
+            .map_err(e)?;
+        tokio::time::sleep(Duration::from_millis(700)).await;
+        match achar_login(d, tab).await? {
+            None if previa => return Ok(Sugestao::Enviou),
+            None => return Err("o formulário de login sumiu".into()),
+            Some(g) if previa => return Ok(Sugestao::Preencheu(g)),
+            Some(g) => atual = g,
+        }
+    }
+    Ok(Sugestao::Nada(atual))
+}
+
+/// Primeira tela de login em duas etapas: digita o usuário (não é segredo), continua e espera o
+/// campo de senha.
+async fn primeira_etapa(d: &Arc<Daemon>, tab: &Tab, usuario: &str) -> Result<Vec<String>, String> {
+    let aba = tab.target_id();
+    let mut quadros = vec![pagina::principal(d, tab).await?];
+    quadros.extend(d.paginas.quadros_filhos(aba));
+    let mut achado = None;
+    for q in quadros {
+        if let Ok(v) = js_ref(d, aba, &q, "etapaUsuario", json!({})).await
+            && v["achou"] == json!(true)
+        {
+            achado = Some((q, v));
+            break;
+        }
+    }
+    let (q, v) = achado.ok_or("nenhum campo de senha nem de usuário visível na página")?;
+    let campo = alvo_em(&q, v["usuario"].as_str().unwrap_or(""));
+    let mut notas = preencher(d, tab, &campo, usuario, false).await?;
+    notas.push("usuário preenchido na primeira etapa".into());
+    match v["botao"].as_str() {
+        Some(b) => {
+            notas.extend(clicar(d, tab, &alvo_em(&q, b), false).await?);
+        }
+        None => tab.press_key("Enter").await.map_err(e)?,
+    }
+    let fim = Instant::now() + Duration::from_secs(15);
+    while Instant::now() < fim {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        if achar_login(d, tab).await?.is_some() {
+            notas.push("tela da senha aberta".into());
+            return Ok(notas);
+        }
+    }
+    Err(
+        "depois do usuário não apareceu campo de senha em 15 s (usuário recusado, captcha ou verificação?)"
+            .into(),
+    )
+}
+
 /// Depois do envio: `checar` (JS do atlas) ou, sem ele, se o campo de senha sumiu.
 async fn resultado_login(d: &Arc<Daemon>, tab: &Tab, checar: Option<&str>) -> String {
     if let Some(c) = checar {
@@ -1032,10 +1168,17 @@ fn passo(acao: &Acao, dado: Option<&str>, alvo: Option<&Alvo>) -> Option<Value> 
         m
     };
     Some(match acao {
-        Acao::Login { enviar, .. } => match enviar {
-            Some(t) => json!({ "login": { "enviar": t } }),
-            None => json!({ "login": {} }),
-        },
+        Acao::Login { enviar, usuario, .. } => {
+            let mut x = json!({});
+            if let Some(t) = enviar {
+                x["enviar"] = json!(t);
+            }
+            if usuario.is_some() {
+                // O valor fica como parâmetro do fluxo.
+                x["usuario"] = json!("{usuario}");
+            }
+            json!({ "login": x })
+        }
         // Senha digitada não vai para o histórico (nem para o rascunho do atlas).
         Acao::Fill { teclas, .. } if alvo.is_some_and(|a| a.l.contains("input[password]")) => {
             let mut x = json!({ "valor": "{senha}" });

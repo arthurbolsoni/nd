@@ -430,7 +430,8 @@ fn pedido(p: &Passo, site: &str) -> Result<(String, Value, Duration), String> {
             };
             (
                 "login",
-                json!({ "enviar": enviar, "checar": campo(v, "checar"), "sem_diff": false }),
+                json!({ "enviar": enviar, "checar": campo(v, "checar"), "usuario": campo(v, "usuario"),
+                        "sem_diff": false }),
                 LONGO,
             )
         }

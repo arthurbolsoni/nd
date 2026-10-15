@@ -544,3 +544,21 @@ Carrossel por `transform` depois de "Próximo":
 - Login em duas etapas (usuário numa tela, senha na outra): o `nd login` age quando aparece o
   campo de senha; a primeira etapa é um `nd click`.
 
+### gov.br (2026-10-15, Edge com janela, `profile-edge` com senha salva)
+
+- O CPF (`accountId`, `type=tel`) e a senha (`password`) têm `autocomplete="new-password"`, e o
+  formulário da senha não tem campo de usuário: o Edge não sugere nada nas duas telas, mesmo com a
+  senha salva.
+- O CPF não sai do cofre do Edge por CDP; entra por `--usuario` (parâmetro do fluxo, não segredo).
+- Só trocar a dica para `current-password` não fez o Edge oferecer a senha; recriar o campo
+  (`cloneNode` + `replaceWith`) fez o Edge analisar o formulário de novo e mostrar a prévia com a
+  seta para baixo. Recriar o campo perde os ouvintes ligados a ele; por isso só é feito em campo
+  marcado `new-password`/`off`, depois da tentativa só com o atributo.
+- O Enter que escolhe a sugestão também enviou o formulário (o gov.br entra com Enter no campo):
+  o `nd login` vê o formulário sumir e não procura o botão.
+- hCaptcha invisível no Continuar passou sem desafio; a chamada aparece no `nd net` como
+  `(iframe)`.
+- O POST da senha volta com redirecionamento e fica no `nd net` com a URL final; o corpo guardado
+  tem `password = ••••`.
+- A sessão é cookie de sessão: reiniciar o Edge do `nd` desloga.
+
