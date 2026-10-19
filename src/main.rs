@@ -41,6 +41,9 @@ struct Abertura {
     /// Edge sem janela (`--headless=new`).
     #[arg(long)]
     headless: bool,
+    /// Extensão sem compactação para carregar (pasta com o manifest.json); pode repetir.
+    #[arg(long)]
+    ext: Vec<String>,
 }
 
 #[derive(Args, Clone)]
@@ -614,6 +617,9 @@ fn start(a: Abertura) -> Result<(), String> {
     if a.headless {
         cmd.arg("--headless");
     }
+    for e in &a.ext {
+        cmd.args(["--ext", e]);
+    }
     cmd.stdin(Stdio::null()).stdout(log).stderr(log2);
     let mut filho = desacoplar(cmd)?;
 
@@ -701,6 +707,7 @@ fn rodar_daemon(a: Abertura) -> Result<(), String> {
         perfil: a.perfil,
         lang: a.lang,
         headless: a.headless,
+        ext: a.ext,
     };
     let r = rt.block_on(daemon::rodar(op));
     if let Err(e) = &r {

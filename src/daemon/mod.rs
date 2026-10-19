@@ -38,6 +38,8 @@ pub struct Opcoes {
     pub perfil: String,
     pub lang: String,
     pub headless: bool,
+    /// Extensões sem compactação carregadas com `--load-extension`.
+    pub ext: Vec<String>,
 }
 
 pub struct Daemon {
@@ -73,6 +75,9 @@ pub async fn rodar(op: Opcoes) -> Result<(), String> {
         cfg = cfg.arg("--disable-sync");
     } else {
         cfg = cfg.user_data_dir(&op.perfil);
+    }
+    for e in &op.ext {
+        cfg = cfg.extension(e);
     }
 
     let (browser, desktop) = if op.oculto {
