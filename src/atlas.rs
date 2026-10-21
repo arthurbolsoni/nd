@@ -555,14 +555,7 @@ fn descrever(p: &Passo) -> String {
 }
 
 fn chamar(est: &Estado, cmd: &str, args: Value, t: Duration) -> Result<String, String> {
-    let r = enviar(
-        est,
-        &Pedido {
-            cmd: cmd.into(),
-            args,
-        },
-        t,
-    )?;
+    let r = enviar(est, &Pedido::novo(cmd, args), t)?;
     if r.ok { Ok(r.saida) } else { Err(r.erro) }
 }
 

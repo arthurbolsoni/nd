@@ -38,7 +38,7 @@ pub async fn executar(d: &Arc<Daemon>, p: &Pedido) -> R {
     if r.is_ok()
         && let Some(passo) = passo_simples(p)
     {
-        d.historico.lock().unwrap().push(passo);
+        d.registrar(passo);
     }
     r
 }
@@ -64,10 +64,7 @@ fn passo_simples(p: &Pedido) -> Option<Value> {
 async fn executar_cmd(d: &Arc<Daemon>, p: &Pedido) -> R {
     match p.cmd.as_str() {
         "status" => status(d).await,
-        "stop" => {
-            d.parar.notify_one();
-            Ok("encerrando o daemon e o Edge".into())
-        }
+        "stop" => parar(d, args(p)?).await,
         "open" => open(d, args(p)?).await,
         "tabs" => tabs(d).await,
         "tab" => tab(d, args(p)?).await,
@@ -139,7 +136,7 @@ async fn executar_cmd(d: &Arc<Daemon>, p: &Pedido) -> R {
             }
         }
         "pdf" => baixar::pdf(d, args(p)?).await,
-        "historico" => Ok(serde_json::to_string(&*d.historico.lock().unwrap()).unwrap_or_default()),
+        "historico" => Ok(d.historico()),
         "net" => net::net(d, args(p)?).await,
         "cdp" => cdp(d, args(p)?).await,
         "api" => net::api(d, args(p)?).await,
@@ -147,19 +144,85 @@ async fn executar_cmd(d: &Arc<Daemon>, p: &Pedido) -> R {
     }
 }
 
-/// Aba em que os comandos atuam; se a anterior fechou, a primeira aba aberta.
+/// Aba em que os comandos da sessão atuam. No primeiro comando da sessão, ou se a aba dela
+/// fechou: outra aba dela; sendo a única sessão, uma aba sem dono; senão, uma janela nova (aba
+/// na janela de outra sessão ficaria escondida atrás da dela).
 pub async fn aba_atual(d: &Arc<Daemon>) -> Result<Tab, String> {
-    let atual = d.atual.lock().unwrap().clone();
-    let tabs = d.browser.tabs().await.map_err(e)?;
+    let sessao = super::sessao();
+    let atual = d.sessoes.lock().unwrap().atual(&sessao);
+    let abas = paginas(d).await?;
     if let Some(id) = atual
-        && let Some(t) = tabs.iter().find(|t| t.target_id() == id)
+        && abas.iter().any(|(a, _, _)| *a == id)
     {
-        return Ok(t.clone());
+        return d.browser.tab(&id).await.map_err(e);
     }
-    let t = tabs.into_iter().next().ok_or("nenhuma aba aberta")?;
-    *d.atual.lock().unwrap() = Some(t.target_id().to_string());
-    preparar_aba(d, t.target_id()).await.map_err(e)?;
-    Ok(t)
+    let livre = {
+        let s = d.sessoes.lock().unwrap();
+        let minha = abas.iter().find(|(a, _, _)| s.dono(a) == Some(sessao.as_str()));
+        // A lista de downloads que o Edge abre numa aba (headless) não serve.
+        let sem_dono = || {
+            abas.iter().find(|(a, _, url)| {
+                s.outras(&sessao) == 0 && s.dono(a).is_none() && !url.starts_with("edge://downloads")
+            })
+        };
+        minha.or_else(sem_dono).map(|(a, _, _)| a.clone())
+    };
+    let id = match livre {
+        Some(id) => id,
+        None => {
+            let r = d
+                .browser
+                .connection()
+                .call(
+                    "Target.createTarget",
+                    json!({ "url": "about:blank", "newWindow": true }),
+                    None,
+                )
+                .await
+                .map_err(e)?;
+            r["targetId"]
+                .as_str()
+                .ok_or("Target.createTarget sem targetId")?
+                .to_string()
+        }
+    };
+    d.sessoes.lock().unwrap().escolher(&sessao, &id);
+    preparar_aba(d, &id).await.map_err(e)
+}
+
+#[derive(Deserialize)]
+struct StopArgs {
+    #[serde(default)]
+    tudo: bool,
+}
+
+/// Fecha as abas da sessão. Sem outras sessões com aba aberta (ou com `--tudo`), encerra o
+/// daemon e o Edge.
+async fn parar(d: &Arc<Daemon>, a: StopArgs) -> R {
+    let sessao = super::sessao();
+    let (minhas, outras) = {
+        let s = d.sessoes.lock().unwrap();
+        (s.abas_de(&sessao), s.outras(&sessao))
+    };
+    if a.tudo || outras == 0 {
+        d.parar.notify_one();
+        return Ok(super::ENCERRANDO.into());
+    }
+    let conn = d.browser.connection();
+    for aba in &minhas {
+        if let Err(x) = conn
+            .call("Target.closeTarget", json!({ "targetId": aba }), None)
+            .await
+        {
+            tracing::debug!("fechando a aba {aba}: {x}");
+        }
+    }
+    d.sessoes.lock().unwrap().esquecer(&sessao);
+    Ok(format!(
+        "abas da sessão fechadas ({}); o Edge segue aberto para {outras} outra(s) sessão(ões) \
+         (nd stop --tudo fecha o Edge)",
+        minhas.len()
+    ))
 }
 
 async fn status(d: &Arc<Daemon>) -> R {
@@ -177,9 +240,13 @@ async fn status(d: &Arc<Daemon>) -> R {
         if op.headless { ", headless" } else { "" }
     ));
     s.push_str(&format!("idioma {}\n", op.lang));
+    let sessao = super::sessao();
+    let outras = d.sessoes.lock().unwrap().outras(&sessao);
+    s.push_str(&format!("sessão {sessao} (outras sessões: {outras})\n"));
+    let t = aba_atual(d).await;
     let abas = paginas(d).await?;
     s.push_str(&format!("abas {}\n", abas.len()));
-    if let Ok(t) = aba_atual(d).await
+    if let Ok(t) = t
         && let Some((i, info)) = abas.iter().enumerate().find(|(_, a)| a.0 == t.target_id())
     {
         s.push_str(&format!("atual [{}] {} — {}", i + 1, info.1, info.2));
@@ -311,7 +378,10 @@ async fn open(d: &Arc<Daemon>, a: OpenArgs) -> R {
     let tab = if a.nova {
         let t = d.browser.new_tab("about:blank").await.map_err(e)?;
         preparar_aba(d, t.target_id()).await.map_err(e)?;
-        *d.atual.lock().unwrap() = Some(t.target_id().to_string());
+        d.sessoes
+            .lock()
+            .unwrap()
+            .escolher(&super::sessao(), t.target_id());
         let _ = t.activate().await;
         t
     } else {
@@ -391,6 +461,8 @@ fn normalizar_url(url: &str) -> String {
 async fn tabs(d: &Arc<Daemon>) -> R {
     let atual = aba_atual(d).await.ok().map(|t| t.target_id().to_string());
     let abas = paginas(d).await?;
+    let sessao = super::sessao();
+    let sessoes = d.sessoes.lock().unwrap();
     let linhas: Vec<String> = abas
         .iter()
         .enumerate()
@@ -400,7 +472,11 @@ async fn tabs(d: &Arc<Daemon>) -> R {
             } else {
                 " "
             };
-            format!("{marca} [{}] {} — {}", i + 1, cortar(titulo, 70), url)
+            let outra = match sessoes.dono(id) {
+                Some(s) if s != sessao => " (outra sessão)",
+                _ => "",
+            };
+            format!("{marca} [{}] {} — {}{outra}", i + 1, cortar(titulo, 70), url)
         })
         .collect();
     Ok(linhas.join("\n"))
@@ -424,9 +500,15 @@ async fn tab(d: &Arc<Daemon>, a: TabArgs) -> R {
     };
     let i = escolhida.ok_or_else(|| format!("nenhuma aba com {:?} no título ou na URL", a.alvo))?;
     let (id, titulo, url) = &abas[i];
+    let sessao = super::sessao();
+    if let Some(dono) = d.sessoes.lock().unwrap().dono(id)
+        && dono != sessao
+    {
+        return Err(format!("a aba [{}] é de outra sessão ({dono})", i + 1));
+    }
     let t = preparar_aba(d, id).await.map_err(e)?;
     let _ = t.activate().await;
-    *d.atual.lock().unwrap() = Some(id.clone());
+    d.sessoes.lock().unwrap().escolher(&sessao, id);
     Ok(format!("* [{}] {} — {}", i + 1, cortar(titulo, 70), url))
 }
 

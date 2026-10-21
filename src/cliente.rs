@@ -14,6 +14,30 @@ pub struct Pedido {
     pub cmd: String,
     #[serde(default)]
     pub args: Value,
+    /// Sessão que manda o comando: cada uma tem a sua aba (ver [`sessao`]).
+    #[serde(default)]
+    pub sessao: Option<String>,
+}
+
+impl Pedido {
+    pub fn novo(cmd: &str, args: Value) -> Self {
+        Self {
+            cmd: cmd.into(),
+            args,
+            sessao: sessao(),
+        }
+    }
+}
+
+/// Sessão do cliente: `ND_SESSAO` (ou `--sessao`), senão a sessão do Claude Code
+/// (`CLAUDE_CODE_SESSION_ID`). Agentes em paralelo na mesma sessão do Claude Code (subagentes)
+/// herdam o mesmo id e precisam de `--sessao` próprio.
+pub fn sessao() -> Option<String> {
+    ["ND_SESSAO", "CLAUDE_CODE_SESSION_ID"]
+        .iter()
+        .filter_map(|v| std::env::var(v).ok())
+        .map(|s| s.trim().to_string())
+        .find(|s| !s.is_empty())
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]

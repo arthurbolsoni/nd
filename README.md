@@ -37,7 +37,8 @@ nd tab <n|trecho>                   escolhe a aba atual
 nd eval '<js>' | -f arq.js          JavaScript na aba atual
 nd text [--sel CSS] [--max N]       texto visível
 nd status
-nd stop
+nd stop [--tudo]                    fecha as abas da sessão; a última sessão (ou --tudo) fecha o Edge
+nd -s <sessão> <comando>            comando na janela da sessão (padrão: ND_SESSAO ou a do Claude Code)
 ```
 
 - Alvo: ref do mapa (`e12`) ou texto (nome do elemento: rótulo, texto, aria-label,
@@ -91,6 +92,12 @@ e22 iframe "localhost:8765"
 - `nd run` executa os passos de um fluxo do atlas sem LLM; para antes de passo com
   `confirmar: true` e, se um passo falhar, mostra o erro, o mapa, a rede recente e como retomar.
   Formato do atlas em [PLANO](docs/PLANO.md#atlas).
+- Sessões: um daemon e um Edge para todos; cada sessão age na sua aba, numa janela própria. A
+  sessão vem de `-s`/`--sessao`, `ND_SESSAO` ou `CLAUDE_CODE_SESSION_ID` (subagentes herdam este
+  último e precisam de `-s`). A primeira sessão usa a aba que já estava aberta; as seguintes
+  ganham janela nova. Pop-up fica com a sessão da aba que o abriu; `nd tabs` marca as abas de outra
+  sessão e `nd tab` recusa escolher uma delas. O rascunho do atlas é por sessão. Os comandos
+  seguem um de cada vez no daemon (o de uma sessão espera o da outra terminar).
 - Perfil padrão: `~/nodriver/profile-edge`. `--perfil temp` usa um perfil descartável.
 - `--oculto`: Edge num desktop Windows oculto, fora da tela e sem roubar o foco.
 - Estado do daemon em `~/.nd/` (`daemon.json`, `daemon.log`); `ND_DIR` muda o diretório.

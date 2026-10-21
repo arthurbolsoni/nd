@@ -23,6 +23,10 @@ use crate::cliente::{Pedido, enviar};
     about = "Automação de navegador (Edge via CDP) para o Claude Code"
 )]
 struct Cli {
+    /// Sessão: cada uma tem a sua janela no mesmo Edge. Padrão: ND_SESSAO, senão a sessão do
+    /// Claude Code. Agentes em paralelo na mesma sessão usam nomes diferentes.
+    #[arg(long, short = 's', global = true)]
+    sessao: Option<String>,
     #[command(subcommand)]
     cmd: Cmd,
 }
@@ -57,8 +61,13 @@ struct OpAcao {
 enum Cmd {
     /// Sobe o daemon e o Edge.
     Start(Abertura),
-    /// Fecha o Edge e encerra o daemon.
-    Stop,
+    /// Fecha a janela da sessão; com outras sessões abertas, o Edge segue. A última sessão (ou
+    /// --tudo) fecha o Edge e encerra o daemon.
+    Stop {
+        /// Fecha o Edge e encerra o daemon mesmo com outras sessões abertas.
+        #[arg(long)]
+        tudo: bool,
+    },
     /// Mostra o daemon, o perfil e a aba atual.
     Status,
     /// Navega a aba atual (ou uma nova), espera rede ociosa + DOM parado e mostra o mapa.
@@ -331,10 +340,14 @@ const ESPERA_SCROLL: Duration = Duration::from_secs(600);
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    if let Some(s) = &cli.sessao {
+        // Antes de qualquer thread: o cliente lê a sessão do ambiente.
+        unsafe { std::env::set_var("ND_SESSAO", s) };
+    }
     let r = match cli.cmd {
         Cmd::Start(a) => start(a),
         Cmd::Daemon(a) => rodar_daemon(a),
-        Cmd::Stop => parar(),
+        Cmd::Stop { tudo } => parar(tudo),
         Cmd::Status => comando("status", json!({}), Duration::from_secs(30)),
         Cmd::Open { url, nova, sem_map } => comando(
             "open",
@@ -543,14 +556,7 @@ fn absoluto(p: Option<PathBuf>) -> Result<Option<String>, String> {
 /// Manda um comando ao daemon e imprime a saída.
 fn comando(cmd: &str, args: serde_json::Value, timeout: Duration) -> Result<(), String> {
     let est = estado::ler().ok_or("o daemon não está rodando; use nd start")?;
-    let r = enviar(
-        &est,
-        &Pedido {
-            cmd: cmd.into(),
-            args,
-        },
-        timeout,
-    )?;
+    let r = enviar(&est, &Pedido::novo(cmd, args), timeout)?;
     if r.ok {
         if !r.saida.is_empty() {
             println!("{}", r.saida);
@@ -561,20 +567,24 @@ fn comando(cmd: &str, args: serde_json::Value, timeout: Duration) -> Result<(), 
     }
 }
 
-fn parar() -> Result<(), String> {
+fn parar(tudo: bool) -> Result<(), String> {
     let Some(est) = estado::ler() else {
         println!("o daemon não está rodando");
         return Ok(());
     };
     match enviar(
         &est,
-        &Pedido {
-            cmd: "stop".into(),
-            args: json!({}),
-        },
+        &Pedido::novo("stop", json!({ "tudo": tudo })),
         Duration::from_secs(10),
     ) {
-        Ok(r) => println!("{}", r.saida),
+        Ok(r) if !r.ok => return Err(r.erro),
+        Ok(r) => {
+            println!("{}", r.saida);
+            // Outras sessões seguem usando o Edge: só a janela desta fechou.
+            if !r.saida.starts_with(daemon::ENCERRANDO) {
+                return Ok(());
+            }
+        }
         Err(e) => {
             println!("daemon não respondeu ({e}); estado apagado");
             let _ = std::fs::remove_file(estado::arquivo());
@@ -591,16 +601,7 @@ fn parar() -> Result<(), String> {
 
 fn start(a: Abertura) -> Result<(), String> {
     if let Some(est) = estado::ler() {
-        if enviar(
-            &est,
-            &Pedido {
-                cmd: "status".into(),
-                args: json!({}),
-            },
-            Duration::from_secs(10),
-        )
-        .is_ok()
-        {
+        if enviar(&est, &Pedido::novo("status", json!({})), Duration::from_secs(10)).is_ok() {
             println!("o daemon já está rodando (nd stop para fechar)");
             return comando("status", json!({}), Duration::from_secs(30));
         }
@@ -626,15 +627,7 @@ fn start(a: Abertura) -> Result<(), String> {
     let inicio = Instant::now();
     loop {
         if let Some(est) = estado::ler()
-            && enviar(
-                &est,
-                &Pedido {
-                    cmd: "status".into(),
-                    args: json!({}),
-                },
-                Duration::from_secs(10),
-            )
-            .is_ok()
+            && enviar(&est, &Pedido::novo("status", json!({})), Duration::from_secs(10)).is_ok()
         {
             return comando("status", json!({}), Duration::from_secs(30));
         }

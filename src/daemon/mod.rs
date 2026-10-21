@@ -1,5 +1,6 @@
 //! `nd daemon`: segura o Edge e a conexão CDP e atende os comandos do cliente por HTTP em
-//! 127.0.0.1, um de cada vez.
+//! 127.0.0.1, um de cada vez. Cada sessão (agente) age na sua própria aba, numa janela própria
+//! do mesmo Edge.
 
 pub mod acoes;
 pub mod baixar;
@@ -8,7 +9,7 @@ pub mod net;
 pub mod pagina;
 pub mod rede;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -30,6 +31,80 @@ use crate::estado::{self, Estado};
 const LIMITE_COMANDO: Duration = Duration::from_secs(180);
 /// `nd scroll --fim` espera a página assentar a cada rolagem (até 5 s cada).
 const LIMITE_SCROLL: Duration = Duration::from_secs(540);
+/// Início da saída do `stop` quando o daemon encerra (o cliente espera o Edge fechar).
+pub const ENCERRANDO: &str = "encerrando o daemon e o Edge";
+/// Sessão de pedido sem sessão (cliente fora do Claude Code, sem `--sessao`).
+const SEM_SESSAO: &str = "padrão";
+
+tokio::task_local! {
+    /// Sessão do comando em execução.
+    static SESSAO: String;
+}
+
+/// Sessão do comando em execução.
+pub fn sessao() -> String {
+    SESSAO
+        .try_with(|s| s.clone())
+        .unwrap_or_else(|_| SEM_SESSAO.into())
+}
+
+/// Que aba é de que sessão. Aba sem dono (a inicial, uma aberta à mão) fica com a primeira
+/// sessão que precisar de aba; pop-up fica com a sessão da aba que o abriu.
+#[derive(Default)]
+pub struct Sessoes {
+    /// Sessão → aba em que os comandos dela atuam.
+    atual: HashMap<String, String>,
+    /// Aba → sessão dona.
+    donos: HashMap<String, String>,
+}
+
+impl Sessoes {
+    pub fn atual(&self, sessao: &str) -> Option<String> {
+        self.atual.get(sessao).cloned()
+    }
+
+    pub fn dono(&self, aba: &str) -> Option<&str> {
+        self.donos.get(aba).map(String::as_str)
+    }
+
+    /// Torna `aba` a atual de `sessao` (e dela).
+    pub fn escolher(&mut self, sessao: &str, aba: &str) {
+        self.atual.insert(sessao.into(), aba.into());
+        self.donos.insert(aba.into(), sessao.into());
+    }
+
+    fn dar(&mut self, aba: &str, sessao: &str) {
+        self.donos.insert(aba.into(), sessao.into());
+    }
+
+    fn remover_aba(&mut self, aba: &str) {
+        self.donos.remove(aba);
+        self.atual.retain(|_, a| a != aba);
+    }
+
+    /// Abas abertas de `sessao`.
+    pub fn abas_de(&self, sessao: &str) -> Vec<String> {
+        self.donos
+            .iter()
+            .filter(|(_, s)| *s == sessao)
+            .map(|(a, _)| a.clone())
+            .collect()
+    }
+
+    /// Outras sessões com aba aberta.
+    pub fn outras(&self, sessao: &str) -> usize {
+        self.donos
+            .values()
+            .filter(|s| *s != sessao)
+            .collect::<HashSet<_>>()
+            .len()
+    }
+
+    pub fn esquecer(&mut self, sessao: &str) {
+        self.atual.remove(sessao);
+        self.donos.retain(|_, s| s != sessao);
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Opcoes {
@@ -46,13 +121,13 @@ pub struct Daemon {
     pub browser: Browser,
     pub opcoes: Opcoes,
     token: String,
-    /// Target id da aba em que os comandos atuam.
-    pub atual: Mutex<Option<String>>,
+    /// Aba de cada sessão.
+    pub sessoes: Mutex<Sessoes>,
     pub rede: rede::Rede,
     pub paginas: pagina::Paginas,
     pub downloads: baixar::Downloads,
-    /// Passos feitos nesta sessão, no formato do atlas (`nd atlas --rascunho`).
-    pub historico: Mutex<Vec<serde_json::Value>>,
+    /// Passos feitos em cada sessão, no formato do atlas (`nd atlas --rascunho`).
+    historico: Mutex<HashMap<String, Vec<Value>>>,
     /// Abas criadas e quando (para a saída das ações).
     criadas: Mutex<Vec<(String, Instant)>>,
     /// Abas com `Network` ligado e eventos sendo acompanhados.
@@ -69,6 +144,10 @@ pub async fn rodar(op: Opcoes) -> Result<(), String> {
     let mut cfg = Config::new()
         .lang(&op.lang)
         .arg("--window-size=1400,950")
+        // Cada sessão tem a sua janela; a que fica atrás de outra segue rodando sem freio.
+        .arg("--disable-backgrounding-occluded-windows")
+        .arg("--disable-renderer-backgrounding")
+        .arg("--disable-background-timer-throttling")
         .headless(op.headless);
     if op.perfil == "temp" {
         // Perfil novo entra sozinho na conta Microsoft do Windows e liga a sync.
@@ -104,12 +183,12 @@ pub async fn rodar(op: Opcoes) -> Result<(), String> {
         browser,
         opcoes: op.clone(),
         token: token.clone(),
-        atual: Mutex::new(None),
+        sessoes: Mutex::new(Sessoes::default()),
         rede: rede::Rede::default(),
         paginas: pagina::Paginas::default(),
         downloads: baixar::Downloads::default(),
         criadas: Mutex::new(Vec::new()),
-        historico: Mutex::new(Vec::new()),
+        historico: Mutex::new(HashMap::new()),
         preparadas: Mutex::new(HashSet::new()),
         filhos: Mutex::new(HashSet::new()),
         fila: tokio::sync::Mutex::new(()),
@@ -123,10 +202,6 @@ pub async fn rodar(op: Opcoes) -> Result<(), String> {
         preparar_aba(&d, tab.target_id())
             .await
             .map_err(|e| e.to_string())?;
-        d.atual
-            .lock()
-            .unwrap()
-            .get_or_insert_with(|| tab.target_id().to_string());
     }
     vigiar_navegador(&d);
 
@@ -196,7 +271,9 @@ async fn tratar(
     } else {
         LIMITE_COMANDO
     };
-    let r = match tokio::time::timeout(limite, comandos::executar(&d, &p)).await {
+    let sessao = p.sessao.clone().unwrap_or_else(|| SEM_SESSAO.into());
+    let comando = SESSAO.scope(sessao, comandos::executar(&d, &p));
+    let r = match tokio::time::timeout(limite, comando).await {
         Ok(Ok(saida)) => Resposta {
             ok: true,
             saida,
@@ -486,6 +563,12 @@ async fn acompanhar_alvos(d: &Arc<Daemon>) {
             match (ev.method.as_str(), alvo) {
                 ("Target.targetCreated", Some(id)) if info["type"] == "page" => {
                     d.criadas.lock().unwrap().push((id.to_string(), Instant::now()));
+                    if let Some(abridor) = info["openerId"].as_str() {
+                        let mut s = d.sessoes.lock().unwrap();
+                        if let Some(dono) = s.dono(abridor).map(str::to_string) {
+                            s.dar(id, &dono);
+                        }
+                    }
                     if let Err(e) = preparar_aba(&d, id).await {
                         tracing::debug!("aba {id} não preparada: {e}");
                     }
@@ -495,10 +578,7 @@ async fn acompanhar_alvos(d: &Arc<Daemon>) {
                     d.criadas.lock().unwrap().retain(|(x, _)| x != id);
                     d.rede.remover(id);
                     d.paginas.remover(id);
-                    let mut atual = d.atual.lock().unwrap();
-                    if atual.as_deref() == Some(id) {
-                        *atual = None;
-                    }
+                    d.sessoes.lock().unwrap().remover_aba(id);
                 }
                 _ => {}
             }
@@ -526,15 +606,34 @@ async fn acompanhar_alvos(d: &Arc<Daemon>) {
 }
 
 impl Daemon {
-    /// Abas criadas desde `t0` que ainda estão abertas.
+    /// Abas criadas desde `t0` que ainda estão abertas, menos as de outra sessão.
     pub fn criadas_desde(&self, t0: Instant) -> Vec<String> {
+        let sessao = sessao();
+        let sessoes = self.sessoes.lock().unwrap();
         self.criadas
             .lock()
             .unwrap()
             .iter()
-            .filter(|(_, t)| *t >= t0)
+            .filter(|(id, t)| *t >= t0 && sessoes.dono(id).is_none_or(|s| s == sessao))
             .map(|(id, _)| id.clone())
             .collect()
+    }
+
+    /// Guarda um passo no histórico da sessão (`nd atlas --rascunho`).
+    pub fn registrar(&self, passo: Value) {
+        self.historico
+            .lock()
+            .unwrap()
+            .entry(sessao())
+            .or_default()
+            .push(passo);
+    }
+
+    /// Passos da sessão, em JSON.
+    pub fn historico(&self) -> String {
+        let h = self.historico.lock().unwrap();
+        let passos = h.get(&sessao()).cloned().unwrap_or_default();
+        serde_json::to_string(&passos).unwrap_or_default()
     }
 }
 

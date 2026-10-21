@@ -80,6 +80,49 @@ async fn fluxo_completo() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn sessoes_tem_abas_proprias() {
+    let base = servir().await;
+    let nd = Nd::new();
+    nd.ok(&["-s", "a", "start", "--perfil", "temp", "--headless"]);
+    nd.ok(&["-s", "a", "open", &format!("{base}/lento.html"), "--sem-map"]);
+    nd.ok(&["-s", "b", "open", &format!("{base}/outra.html"), "--sem-map"]);
+
+    // Comandos das duas sessões ao mesmo tempo: cada um na sua aba.
+    let titulos: Vec<_> = std::thread::scope(|sc| {
+        let tarefas: Vec<_> = (0..4)
+            .flat_map(|_| ["a", "b"])
+            .map(|s| {
+                let nd = &nd;
+                sc.spawn(move || (s, nd.ok(&["-s", s, "eval", "document.title"])))
+            })
+            .collect();
+        tarefas.into_iter().map(|t| t.join().unwrap()).collect()
+    });
+    for (s, titulo) in titulos {
+        let esperado = if s == "a" { "Lento" } else { "Outra página" };
+        assert_eq!(titulo.trim(), esperado, "sessão {s}");
+    }
+
+    let abas = nd.ok(&["-s", "b", "tabs"]);
+    assert!(
+        abas.contains("Lento") && abas.contains("(outra sessão)"),
+        "{abas}"
+    );
+    let r = nd.run(&["-s", "b", "tab", "Lento"]);
+    assert!(!r.status.success());
+    assert!(String::from_utf8_lossy(&r.stderr).contains("outra sessão"));
+
+    // stop de uma sessão fecha só a aba dela.
+    let parou = nd.ok(&["-s", "b", "stop"]);
+    assert!(parou.contains("segue aberto"), "{parou}");
+    assert!(nd.estado().exists());
+    assert_eq!(nd.ok(&["-s", "a", "eval", "document.title"]).trim(), "Lento");
+    assert!(!nd.ok(&["-s", "a", "tabs"]).contains("Outra página"));
+    nd.ok(&["-s", "a", "stop"]);
+    assert!(!nd.estado().exists());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn perfil_em_uso_falha_com_mensagem() {
     let perfil = tempfile::tempdir().unwrap();
     let p = perfil.path().to_str().unwrap();

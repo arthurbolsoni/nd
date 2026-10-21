@@ -854,7 +854,7 @@ pub async fn agir(d: &Arc<Daemon>, a: AcaoArgs, acao: Acao) -> R {
         }
     };
     if let Some(p) = passo(&acao, a.alvo.as_deref(), alvo.as_ref()) {
-        d.historico.lock().unwrap().push(p);
+        d.registrar(p);
     }
     let espera = estabilizar(d, &tab, t0, ESPERA_ACAO).await;
 
