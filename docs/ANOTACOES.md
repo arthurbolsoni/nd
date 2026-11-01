@@ -6,7 +6,7 @@
 
 - Linguagem: Rust nos dois repos.
 - `nodriver-rs`: fork público de `ultrafunkamsterdam/nodriver`; recebe a biblioteca Rust.
-- `nd`: repo privado; ferramenta que usa a biblioteca.
+- `nd`: repo público, AGPL-3.0; ferramenta que usa a biblioteca.
 - Cliente CDP próprio, sem chromiumoxide: chromiumoxide ativa domínios por conta própria
   (`Runtime.enable`), detectável por anti-bot.
 
