@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Captcha</title>
+<style>
+  body { margin: 0; background: #fff; font-family: sans-serif; }
+  #cab { background: #4682dc; color: #fff; width: 300px; height: 90px; margin: 10px 10px 8px; }
+  #grade { margin-left: 10px; width: 208px; display: flex; flex-wrap: wrap; gap: 4px; }
+  .peca { width: 100px; height: 100px; cursor: pointer; }
+  .alvo { background: rgb(210, 40, 40); }
+  .outro { background: rgb(40, 150, 60); }
+</style>
+</head>
+<body>
+<div id="cab"><p>Selecione todos os quadrados com carros (captcha)</p></div>
+<div id="grade">
+  <div class="peca alvo" data-i="0"></div><div class="peca outro" data-i="1"></div>
+  <div class="peca outro" data-i="2"></div><div class="peca alvo" data-i="3"></div>
+</div>
+<p id="sel"></p>
+<script>
+  const marcadas = new Set();
+  document.querySelectorAll('.peca').forEach(p => p.addEventListener('click', () => {
+    marcadas.add(p.dataset.i);
+    document.getElementById('sel').textContent = [...marcadas].sort().join(',');
+  }));
+</script>
+</body>
+</html>

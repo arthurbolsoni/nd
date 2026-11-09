@@ -2,8 +2,10 @@
 //! os outros comandos falam com ele e terminam na hora.
 
 mod atlas;
+mod captcha;
 mod cliente;
 mod daemon;
+mod decisor;
 mod desktop;
 mod estado;
 
@@ -325,6 +327,66 @@ enum Cmd {
         #[arg(long)]
         tudo: bool,
     },
+    /// O Decider (pplx-decider, modelo de decisão, não é LLM) dirige a página até cumprir o objetivo:
+    /// a cada passo lê o mapa, escolhe ação, alvo e valor e o `nd` executa. Para com código 2 e
+    /// imprime o mapa quando precisa de você (passo sensível, ação repetida, confiança baixa, limite).
+    /// Precisa de OPENROUTER_API_KEY (ambiente ou ~/.nd/.env).
+    Step {
+        /// O que fazer na página, em uma frase com os nomes e números que importam.
+        objetivo: String,
+        /// Dado que o Decider pode digitar ou escolher: -d "e-mail=a@b.com" (repetível). Ele não
+        /// escreve texto livre: só usa estes valores ou um número visível na página.
+        #[arg(short = 'd', long = "dado")]
+        dados: Vec<String>,
+        /// Máximo de passos.
+        #[arg(long, default_value_t = 40)]
+        max: usize,
+        /// Devolve o controle quando a confiança do passo fica abaixo deste valor (0 = desligado).
+        #[arg(long, default_value_t = 0.0)]
+        confianca: f64,
+        /// Deixa clicar em botões de enviar, pagar, apagar, confirmar (o usuário já autorizou).
+        #[arg(long)]
+        confirmado: bool,
+    },
+    /// Resolve captcha de grade com o Decider (pplx-decider, não é LLM): divide a imagem em peças e
+    /// pergunta a cada uma se contém o alvo. Com ARQUIVO só imprime a grade marcada; sem ARQUIVO captura
+    /// a aba atual, resolve e clica nas peças (--seco só imprime). Precisa de OPENROUTER_API_KEY.
+    /// Dentro do `nd step` isto roda sozinho quando a página mostra um captcha.
+    Captcha {
+        /// Imagem do captcha (png, jpg, webp). Sem ela, usa a aba atual.
+        arquivo: Option<PathBuf>,
+        /// Objeto ou instrução, ex.: "traffic lights". Sem ele vale a instrução da página ou do cabeçalho da imagem.
+        #[arg(long)]
+        alvo: Option<String>,
+        /// Linhas da grade (com --colunas); sem elas a grade é achada pelas linhas brancas.
+        #[arg(long)]
+        linhas: Option<usize>,
+        #[arg(long)]
+        colunas: Option<usize>,
+        /// X,Y,LARGURA,ALTURA da grade dentro da imagem (com --linhas e --colunas).
+        #[arg(long)]
+        recorte: Option<String>,
+        /// Desafio que não é grade de fotos (arrastar, formas, padrão): grava a imagem do desafio com a
+        /// grade numerada e imprime o caminho, para você olhar e usar --clicar ou --arrastar.
+        #[arg(long, conflicts_with_all = ["arquivo", "clicar", "arrastar"])]
+        numerar: bool,
+        /// Clica nas células numeradas (--numerar), ex.: --clicar 6,10
+        #[arg(long, value_delimiter = ',', conflicts_with_all = ["arquivo", "arrastar"])]
+        clicar: Vec<u32>,
+        /// Arrasta da célula A para a célula B, ex.: --arrastar 3,9
+        #[arg(long, value_delimiter = ',', conflicts_with = "arquivo")]
+        arrastar: Vec<u32>,
+        /// Desafio que não é grade de fotos: o Decider olha a imagem numerada e escolhe as células
+        /// (clicar ou arrastar), e o nd executa. A instrução vem do mapa da página (ou de --alvo).
+        #[arg(long, conflicts_with_all = ["numerar", "clicar", "arrastar"])]
+        decider: bool,
+        /// Lado das células numeradas, em pixels.
+        #[arg(long, default_value_t = captcha::CELULA)]
+        celula: u32,
+        /// Na aba atual: só mostra a grade marcada, sem clicar.
+        #[arg(long)]
+        seco: bool,
+    },
     /// Comando CDP cru na aba atual (depuração): nd cdp Network.getResponseBody '{"requestId":"1.2"}'
     #[command(hide = true)]
     Cdp { metodo: String, params: Option<String> },
@@ -536,6 +598,58 @@ fn main() -> ExitCode {
             (None, None) => Err("informe o JavaScript ou -f arquivo.js".into()),
         },
         Cmd::Text { sel, max } => comando("text", json!({ "sel": sel, "max": max }), Duration::from_secs(60)),
+        Cmd::Captcha {
+            arquivo,
+            alvo,
+            linhas,
+            colunas,
+            recorte,
+            numerar,
+            clicar,
+            arrastar,
+            decider,
+            celula,
+            seco,
+        } => {
+            if decider {
+                captcha_decider(arquivo, alvo, celula, seco)
+            } else if numerar || !clicar.is_empty() || !arrastar.is_empty() {
+                captcha_celulas(numerar, &clicar, &arrastar, celula)
+            } else {
+                captcha_cmd(arquivo, alvo, linhas, colunas, recorte, seco)
+            }
+        }
+        Cmd::Step {
+            objetivo,
+            dados,
+            max,
+            confianca,
+            confirmado,
+        } => match dados
+            .iter()
+            .map(|d| {
+                d.split_once('=')
+                    .map(|(k, v)| (k.trim().to_string(), v.to_string()))
+                    .ok_or_else(|| format!("dado sem '=': {d:?} (use -d nome=valor)"))
+            })
+            .collect::<Result<Vec<_>, _>>()
+        {
+            Err(e) => Err(e),
+            Ok(dados) => match decisor::rodar(decisor::Opcoes {
+                objetivo,
+                dados,
+                max,
+                confianca,
+                confirmado,
+            }) {
+                Ok(decisor::Fim::Concluido) => Ok(()),
+                Ok(decisor::Fim::Devolvido(motivo)) => {
+                    eprintln!("devolvido ao chamador: {motivo}");
+                    return ExitCode::from(2);
+                }
+                Err(e) => Err(e),
+            },
+        },
     };
     match r {
         Ok(()) => ExitCode::SUCCESS,
@@ -544,6 +658,97 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+fn captcha_cmd(
+    arquivo: Option<PathBuf>,
+    alvo: Option<String>,
+    linhas: Option<usize>,
+    colunas: Option<usize>,
+    recorte: Option<String>,
+    seco: bool,
+) -> Result<(), String> {
+    let recorte = recorte
+        .map(|r| {
+            let v: Vec<u32> = r.split(',').filter_map(|n| n.trim().parse().ok()).collect();
+            <[u32; 4]>::try_from(v)
+                .map(|[x, y, w, h]| (x, y, w, h))
+                .map_err(|_| format!("--recorte espera X,Y,LARGURA,ALTURA: {r:?}"))
+        })
+        .transpose()?;
+    let p = captcha::Params { alvo, instrucao: None, linhas, colunas, recorte };
+    let r = match arquivo {
+        Some(f) => {
+            let img = image::open(&f).map_err(|e| format!("{}: {e}", f.display()))?.to_rgb8();
+            captcha::resolver(&img, &p)?
+        }
+        None => {
+            let est = estado::ler().ok_or("o daemon não está rodando; use nd start")?;
+            match captcha::resolver_pagina(&est, &p, None, !seco)? {
+                Some((r, _)) => r,
+                None => return Err("a aba atual não mostra uma grade de captcha".into()),
+            }
+        }
+    };
+    println!("{}", captcha::relatorio(&r));
+    println!("{}", r.tempos.texto());
+    println!(
+        "decider: {} chamadas, {} tokens de entrada, {} de saída, US$ {:.4}",
+        r.uso.chamadas, r.uso.entrada, r.uso.saida, r.uso.custo
+    );
+    Ok(())
+}
+
+/// `nd captcha --decider`: o Decider escolhe as células do desafio atual e o nd joga.
+fn captcha_decider(arquivo: Option<PathBuf>, instrucao: Option<String>, celula: u32, seco: bool) -> Result<(), String> {
+    let est = if arquivo.is_some() { None } else { Some(estado::ler().ok_or("o daemon não está rodando; use nd start")?) };
+    let instrucao = match (instrucao, &est) {
+        (Some(i), _) => i,
+        (None, Some(est)) => {
+            let (_, mapa) = decisor::pedir(est, "map", json!({ "tudo": false }))?;
+            captcha::instrucao_do_mapa(&mapa).ok_or("sem instrução do desafio no mapa; informe --alvo \"...\"")?
+        }
+        (None, None) => return Err("com arquivo, informe a instrução em --alvo \"...\"".into()),
+    };
+    let cap = match (&arquivo, &est) {
+        (Some(f), _) => captcha::Captura {
+            img: image::open(f).map_err(|e| format!("{}: {e}", f.display()))?.to_rgb8(),
+            x: 0.0,
+            y: 0.0,
+        },
+        (None, Some(est)) => captcha::capturar(est)?,
+        _ => unreachable!(),
+    };
+    let mut uso = decisor::Uso::default();
+    let (jogada, texto) = captcha::decidir_celulas(&cap.img, &instrucao, celula, &mut uso)?;
+    println!("instrução: {instrucao}\n{texto}");
+    if let (false, Some(est)) = (seco, &est) {
+        captcha::jogar(est, celula, &jogada)?;
+    }
+    println!("decider: {} chamadas, US$ {:.4}", uso.chamadas, uso.custo);
+    Ok(())
+}
+
+/// `nd captcha --numerar | --clicar N,N | --arrastar A,B`: desafio que não é grade de fotos.
+fn captcha_celulas(numerar: bool, clicar: &[u32], arrastar: &[u32], celula: u32) -> Result<(), String> {
+    if !arrastar.is_empty() && arrastar.len() != 2 {
+        return Err("--arrastar espera duas células: --arrastar DE,PARA".into());
+    }
+    if celula < 16 {
+        return Err("--celula precisa ser de pelo menos 16 px".into());
+    }
+    let est = estado::ler().ok_or("o daemon não está rodando; use nd start")?;
+    if numerar {
+        let destino = estado::dir().join("captcha-grade.png");
+        println!("{}", captcha::gravar_numerada(&est, celula, &destino)?);
+    } else if !clicar.is_empty() {
+        captcha::clicar_celulas(&est, celula, clicar)?;
+        println!("clicou nas células {clicar:?}");
+    } else {
+        captcha::arrastar_celulas(&est, celula, arrastar[0], arrastar[1])?;
+        println!("arrastou da célula {} para a {}", arrastar[0], arrastar[1]);
+    }
+    Ok(())
 }
 
 /// Caminho absoluto (o daemon roda noutro diretório).

@@ -32,6 +32,9 @@ nd pdf <arq> [--paisagem]           imprime a aba atual em PDF
 nd atlas [site]                     atlas do site (~/nodriver/sites/<site>.yaml); sem site, lista
 nd atlas --rascunho                 passos desta sessão em YAML, pelo nome, para virar fluxo
 nd run <site> <fluxo> -p k=v... [--desde N] [--ate N] [--confirmado] [--seco] [--tudo]
+nd step <objetivo> [-d chave=valor]... [--max N] [--confianca X] [--confirmado]   o Decider dirige a página
+nd captcha [arquivo] [--alvo X] [--linhas L --colunas C --recorte X,Y,W,H] [--seco]   captcha de grade pelo Decider
+nd captcha --decider | --numerar | --clicar N,N | --arrastar DE,PARA [--celula PX]   desafio que não é grade de fotos
 nd tabs                             lista as abas (* = atual)
 nd tab <n|trecho>                   escolhe a aba atual
 nd eval '<js>' | -f arq.js          JavaScript na aba atual
@@ -43,6 +46,45 @@ nd -s <sessão> <comando>            comando na janela da sessão (padrão: ND_S
 
 - Alvo: ref do mapa (`e12`) ou texto (nome do elemento: rótulo, texto, aria-label,
   placeholder). Texto que bate com mais de um elemento dá erro com a lista de refs.
+- `nd pick` com texto que bate em mais de uma opção não escolhe a primeira: dá erro. Em lista
+  customizada a lista segue aberta e o erro traz as refs das opções (`e18 option "..."`); clique
+  na certa com `nd click e18`. Em `<select>` nativo o erro lista os textos. Texto igual a uma
+  opção continua escolhendo essa opção.
+- `nd step <objetivo>`: quem decide cada passo é o **Decider** (`perplexity/pplx-decider-v1.2`,
+  modelo de decisão da Perplexity via OpenRouter), não uma LLM. A cada passo ele recebe o objetivo,
+  os dados (`-d nome=valor`), o histórico, a saída da última ação e o mapa da página, e responde
+  três perguntas de múltipla escolha (ação, alvo e valor) com probabilidades; o `nd` executa e
+  repete até ele dizer `concluir`. Ele não escreve texto livre: só digita os valores de `-d` ou
+  um número visível na página (um token mostrado na tela, por exemplo). Cada linha mostra a
+  confiança do passo, e o fim imprime chamadas, tokens e o valor gasto em dólar.
+  Para com código 2 e imprime o mapa atual quando não deve seguir sozinho: clique em botão
+  sensível (enviar, pagar, apagar, confirmar; `--confirmado` libera), a mesma ação três vezes,
+  confiança abaixo de `--confianca` ou limite de `--max` passos. Precisa de `OPENROUTER_API_KEY`
+  (ambiente ou linha em `~/.nd/.env`); `ND_DECIDER_MODEL` e `ND_DECIDER_URL` trocam modelo e
+  endereço. Comparação com o Claude em `bench/`.
+- `nd captcha`: captcha de grade ("selecione todos os quadrados com semáforos", reCAPTCHA e hCaptcha).
+  Divide a imagem em peças e pergunta ao Decider, peça a peça, se atende à instrução (sim/não com
+  probabilidade). A grade é achada pelas linhas brancas entre as peças. A instrução vem de `--alvo`,
+  da frase que a página mostra no mapa (hCaptcha: "Select all drinks that can be hot or cold") ou do
+  cabeçalho recortado da imagem, que segue junto de cada peça (reCAPTCHA); não há lista de objetos.
+  Com `arquivo` imprime a grade marcada (`X` atende) e as peças de confiança baixa; sem `arquivo`
+  captura a aba atual (o quadro do reCAPTCHA ou hCaptcha, se houver, senão a janela) e clica nas peças
+  marcadas (`--seco` não clica). Imprime o tempo de captura, peças e cliques. Foto única sem linhas
+  brancas precisa de `--linhas` e `--colunas` (e `--recorte` com cabeçalho). Dentro do `nd step` roda
+  sozinho: quando o mapa da página cita captcha e a captura tem uma grade, o `nd` marca as peças e o
+  passo seguinte fica com o Decider (clicar em Verificar/Próximo); até 6 rodadas por execução. Desafio
+  aberto que não é grade de peças (arrastar, clicar em formas) devolve o controle com código 2.
+  Mesma chave e mesmas variáveis do `nd step`. `ND_CAPTCHA_SALVAR=arquivo.png` grava a captura.
+  Desafio que não é grade de fotos (hCaptcha: ícone que quebra o padrão, formas iguais, arrastar
+  a peça): `nd captcha --numerar` grava `<estado>/captcha-grade.png`, a captura do desafio com uma
+  grade de células de 48 px numeradas de 1 em diante (por linha), para quem chamou olhar a imagem;
+  `--clicar 6,10` clica no centro das células e `--arrastar 3,9` arrasta da célula 3 para a 9. O
+  `--decider` faz o Decider escolher as células olhando a imagem numerada (clicar nas N melhores, ou
+  pegar e soltar no "Drag ..."); a instrução vem do mapa ou de `--alvo`. O `nd step` faz isso sozinho:
+  até 4 tentativas por execução (cada desafio do hCaptcha tem 2 páginas) e, se falhar, devolve o
+  controle com a imagem numerada para quem chamou. Acerto medido na demo do hCaptcha: grade de fotos
+  quase sempre; "torre incompleta" e "arrastar o item do padrão" em parte das vezes; "clicar nas TRÊS
+  formas" e "arrastar a forma" quase nunca (confiança de 0,03 a 0,15).
 - Ações imprimem o que mudou: `+` elemento novo, `-` sumiu (saiu do DOM ou foi escondido), `~`
   mudou, `fora da vista N` (segue na página, recortado por uma área como carrossel), `texto novo:`,
   avisos, diálogos aceitos, ou `página nova` com o mapa. `--sem-diff` não lê a página depois.

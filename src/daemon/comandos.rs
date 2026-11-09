@@ -139,6 +139,9 @@ async fn executar_cmd(d: &Arc<Daemon>, p: &Pedido) -> R {
         "historico" => Ok(d.historico()),
         "net" => net::net(d, args(p)?).await,
         "cdp" => cdp(d, args(p)?).await,
+        "shot" => shot(d, args(p)?).await,
+        "clicarxy" => clicarxy(d, args(p)?).await,
+        "arrastarxy" => arrastarxy(d, args(p)?).await,
         "api" => net::api(d, args(p)?).await,
         outro => Err(format!("comando desconhecido: {outro}")),
     }
@@ -279,6 +282,69 @@ async fn cdp(d: &Arc<Daemon>, a: CdpArgs) -> R {
     let params = if a.params.is_null() { json!({}) } else { a.params };
     let v = tab.call(&a.metodo, params).await.map_err(e)?;
     Ok(serde_json::to_string_pretty(&v).unwrap_or_default())
+}
+
+#[derive(Deserialize)]
+struct ShotArgs {
+    /// Seletor CSS do primeiro elemento visível que casa; sem ele (ou sem casar), a janela inteira.
+    sel: Option<String>,
+}
+
+/// PNG da área visível (ou do elemento `sel`). Devolve JSON `{png (base64), x, y, w, h}` com a
+/// origem da imagem em pixels da janela, a mesma medida de `clicarxy`.
+async fn shot(d: &Arc<Daemon>, a: ShotArgs) -> R {
+    let tab = aba_atual(d).await?;
+    let sel = serde_json::to_string(&a.sel.unwrap_or_default()).map_err(e)?;
+    let js = format!(
+        "((sel) => {{ let b = null; \
+           if (sel) for (const el of document.querySelectorAll(sel)) {{ \
+             const r = el.getBoundingClientRect(); \
+             if (r.width >= 150 && r.height >= 150 && el.checkVisibility({{ checkVisibilityCSS: true }})) {{ b = r; break; }} }} \
+           const W = document.documentElement.clientWidth, H = document.documentElement.clientHeight; \
+           const x = b ? Math.max(0, b.x) : 0, y = b ? Math.max(0, b.y) : 0; \
+           const w = b ? Math.min(W, b.right) - x : W, h = b ? Math.min(H, b.bottom) - y : H; \
+           return {{ x, y, w, h, sx: scrollX, sy: scrollY }}; }})({sel})"
+    );
+    let r = tab.evaluate(&js).await.map_err(e)?;
+    let n = |k: &str| r[k].as_f64().unwrap_or(0.0);
+    if n("w") < 1.0 || n("h") < 1.0 {
+        return Err("área sem tamanho visível para capturar".into());
+    }
+    let shot = tab
+        .call(
+            "Page.captureScreenshot",
+            json!({ "format": "png", "clip": {
+                "x": n("x") + n("sx"), "y": n("y") + n("sy"), "width": n("w"), "height": n("h"), "scale": 1 } }),
+        )
+        .await
+        .map_err(e)?;
+    Ok(json!({ "png": shot["data"], "x": n("x"), "y": n("y"), "w": n("w"), "h": n("h") }).to_string())
+}
+
+#[derive(Deserialize)]
+struct ClicarXyArgs {
+    x: f64,
+    y: f64,
+}
+
+/// Clique de mouse (CDP) num ponto da janela.
+async fn clicarxy(d: &Arc<Daemon>, a: ClicarXyArgs) -> R {
+    let tab = aba_atual(d).await?;
+    tab.mouse_click(a.x, a.y).await.map_err(e)?;
+    Ok(format!("clique em {:.0},{:.0}", a.x, a.y))
+}
+
+#[derive(Deserialize)]
+struct ArrastarXyArgs {
+    de: (f64, f64),
+    para: (f64, f64),
+}
+
+/// Arrasta com o mouse (CDP) de um ponto da janela a outro.
+async fn arrastarxy(d: &Arc<Daemon>, a: ArrastarXyArgs) -> R {
+    let tab = aba_atual(d).await?;
+    tab.mouse_drag(a.de, a.para, 25).await.map_err(e)?;
+    Ok(format!("arrastou de {:.0},{:.0} para {:.0},{:.0}", a.de.0, a.de.1, a.para.0, a.para.1))
 }
 
 #[derive(Deserialize)]
