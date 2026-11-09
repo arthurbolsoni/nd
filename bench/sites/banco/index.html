@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Banco Horizonte</title>
+<style>
+  body { font-family: sans-serif; margin: 0; background: #eef1f5; }
+  [hidden] { display: none !important; }
+  .topo { background: #0b3d91; color: #fff; padding: 8px 16px; display: flex; gap: 12px; align-items: center; }
+  .layout { display: flex; }
+  .lateral { width: 48px; background: #fff; min-height: 90vh; padding: 8px; }
+  .lateral.aberta { width: 200px; }
+  .lateral .rot { display: none; }
+  .lateral.aberta .rot { display: inline; }
+  .lateral button { display: block; width: 100%; text-align: left; margin: 2px 0; }
+  .sub { margin-left: 12px; }
+  main { padding: 16px; flex: 1; max-width: 640px; }
+  .box { background: #fff; padding: 12px; margin: 8px 0; border: 1px solid #ccc; }
+  .lista { list-style: none; margin: 0; padding: 0; border: 1px solid #888; background: #fff; }
+  .lista li { padding: 4px 8px; cursor: pointer; }
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: flex; align-items: center; justify-content: center; }
+  .modal > div { background: #fff; padding: 16px; width: 380px; }
+  .cal { display: grid; grid-template-columns: repeat(7, 36px); gap: 2px; }
+  .cal button { height: 30px; }
+  .carrossel { overflow: hidden; width: 330px; border: 1px solid #aaa; }
+  .trilho { display: flex; transition: none; }
+  .cartao { min-width: 330px; padding: 12px; box-sizing: border-box; }
+  label { display: block; margin: 8px 0 2px; }
+  .toast { position: fixed; bottom: 16px; right: 16px; background: #222; color: #fff; padding: 10px 14px; }
+</style>
+</head>
+<body>
+<div class="topo"><strong>Banco Horizonte</strong><span id="saudacao"></span>
+  <button id="sair" hidden onclick="sair()">Sair</button></div>
+
+<section id="login" class="box" style="max-width:360px;margin:24px auto">
+  <div id="login1">
+    <h2>Acesse sua conta</h2>
+    <label for="ag">Agência</label><input id="ag" inputmode="numeric">
+    <label for="cc">Conta com dígito</label><input id="cc">
+    <p><button onclick="login1()">Continuar</button></p>
+  </div>
+  <div id="login2" hidden>
+    <h2>Digite sua senha</h2>
+    <label for="senha">Senha de 6 dígitos</label><input id="senha" type="password">
+    <p><button onclick="login2()">Entrar</button></p>
+  </div>
+  <p id="login-erro" role="alert"></p>
+</section>
+
+<div class="layout" id="app" hidden>
+  <nav class="lateral" id="lateral" aria-label="Menu lateral">
+    <button id="alterna" aria-label="Expandir menu" onclick="alternaMenu()">☰</button>
+    <button onclick="tela('inicio')" aria-label="Início">🏠<span class="rot"> Início</span></button>
+    <button onclick="tela('extrato')" aria-label="Extrato">📄<span class="rot"> Extrato</span></button>
+    <button onclick="tela('cartoes')" aria-label="Cartões">💳<span class="rot"> Cartões</span></button>
+    <button id="m-pix" aria-expanded="false" aria-label="Pix" onclick="subPix()">⚡<span class="rot"> Pix</span></button>
+    <div class="sub" id="sub-pix" hidden>
+      <button onclick="tela('transferir')" aria-label="Pix: Transferir">↗<span class="rot"> Transferir</span></button>
+      <button onclick="tela('cobrar')" aria-label="Pix: Cobrar">↙<span class="rot"> Cobrar</span></button>
+      <button onclick="tela('chaves')" aria-label="Pix: Minhas chaves">🔑<span class="rot"> Minhas chaves</span></button>
+    </div>
+    <button onclick="tela('invest')" aria-label="Investimentos">📈<span class="rot"> Investimentos</span></button>
+  </nav>
+
+  <main>
+    <section id="t-inicio"><h1>Olá, Arthur</h1><div class="box">Saldo disponível: R$ 4.820,15</div></section>
+    <section id="t-extrato" hidden><h1>Extrato</h1><div class="box">Sem lançamentos nos últimos 7 dias.</div></section>
+    <section id="t-cobrar" hidden><h1>Cobrar com Pix</h1></section>
+    <section id="t-chaves" hidden><h1>Minhas chaves Pix</h1></section>
+    <section id="t-invest" hidden><h1>Investimentos</h1></section>
+
+    <section id="t-cartoes" hidden>
+      <h1>Cartões</h1>
+      <div class="carrossel"><div class="trilho" id="trilho"></div></div>
+      <button aria-label="Cartão anterior" onclick="mover(-1)">‹</button>
+      <button aria-label="Próximo cartão" onclick="mover(1)">›</button>
+      <p id="cartao-ativo"></p>
+      <button id="cfg-btn" aria-expanded="false" onclick="$('cfg').hidden=!$('cfg').hidden">Configurações do cartão</button>
+      <div class="box" id="cfg" hidden>
+        <button id="bloquear" onclick="bloquear()">Bloquear temporariamente</button>
+        <label for="limite">Limite de crédito (R$)</label>
+        <input id="limite" inputmode="numeric">
+        <button onclick="salvarLimite()">Salvar limite</button>
+      </div>
+    </section>
+
+    <section id="t-transferir" hidden>
+      <h1>Transferir com Pix</h1>
+      <p>Etapa <span id="et">1</span> de 3</p>
+      <div id="e1">
+        <label for="dest">Para quem você quer transferir?</label>
+        <input id="dest" role="combobox" aria-expanded="false" oninput="sugerir(this.value)" autocomplete="off">
+        <ul class="lista" id="sug" role="listbox" hidden></ul>
+        <p id="dest-ok"></p>
+        <button onclick="etapa(2)">Continuar</button>
+      </div>
+      <div id="e2" hidden>
+        <label for="valor">Valor (R$)</label><input id="valor" inputmode="decimal">
+        <fieldset><legend>Quando</legend>
+          <label><input type="radio" name="quando" value="hoje" checked onchange="quando()"> Hoje</label>
+          <label><input type="radio" name="quando" value="agendar" onchange="quando()"> Agendar</label>
+        </fieldset>
+        <div id="agenda" hidden>
+          <button id="btn-data" onclick="$('cal').hidden=!$('cal').hidden">Escolher data</button>
+          <span id="data-sel"></span>
+          <div class="box cal-box" id="cal" hidden>
+            <strong>novembro de 2026</strong>
+            <div class="cal" id="dias"></div>
+          </div>
+        </div>
+        <label for="desc">Descrição (opcional)</label><textarea id="desc"></textarea>
+        <p><button onclick="etapa(1)">Voltar</button> <button onclick="etapa(3)">Revisar</button></p>
+        <p id="erro2" role="alert"></p>
+      </div>
+      <div id="e3" hidden>
+        <h3>Revise a transferência</h3>
+        <ul id="resumo"></ul>
+        <p><button onclick="etapa(2)">Voltar</button> <button id="confirmar" onclick="pedirToken()">Confirmar transferência</button></p>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="modal" id="m-token" hidden role="dialog" aria-label="Confirme com seu token">
+  <div>
+    <h3>Confirme com seu token</h3>
+    <label for="token">Token de 6 dígitos</label><input id="token" inputmode="numeric">
+    <p><a href="#" id="onde" onclick="$('onde-tk').hidden=!$('onde-tk').hidden; return false;">Onde vejo meu token?</a></p>
+    <p id="onde-tk" hidden>Seu token atual é <strong id="tk"></strong> (vale por 5 minutos).</p>
+    <p><button onclick="$('m-token').hidden=true">Cancelar</button> <button onclick="confirmarToken()">Autorizar</button></p>
+    <p id="erro-tk" role="alert"></p>
+  </div>
+</div>
+<div class="toast" id="toast" hidden role="status"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const TOKEN = String(100000 + Math.floor(Math.random() * 899999));
+$('tk').textContent = TOKEN;
+const CONTATOS = [
+  { id: 1, nome: 'Marina Costa Lima', doc: '***.412.907-**' },
+  { id: 2, nome: 'Marina Costa', doc: '***.118.340-**' },
+  { id: 3, nome: 'Marcos Costa', doc: '***.220.771-**' },
+  { id: 4, nome: 'Mariana Souza', doc: '***.903.552-**' },
+];
+const CARTOES = [
+  { id: 'c1', final: '8820', tipo: 'Débito', limite: 0, bloqueado: false },
+  { id: 'c2', final: '4417', tipo: 'Crédito Gold', limite: 2000, bloqueado: false },
+  { id: 'c3', final: '1093', tipo: 'Crédito Virtual', limite: 500, bloqueado: false },
+];
+const estado = window.__estado = { logado: false, transferencias: [], cartoes: CARTOES };
+let dest = null, quandoSel = 'hoje', dataSel = '', idx = 0;
+
+function toast(t) { const e = $('toast'); e.textContent = t; e.hidden = false; setTimeout(() => e.hidden = true, 2500); }
+function login1() {
+  if ($('ag').value.trim() === '0412' && $('cc').value.trim() === '77120-5') { $('login1').hidden = true; $('login2').hidden = false; $('login-erro').textContent = ''; }
+  else $('login-erro').textContent = 'Agência ou conta inválida';
+}
+function login2() {
+  if ($('senha').value === '135790') { estado.logado = true; $('login').hidden = true; $('app').hidden = false; $('sair').hidden = false; $('saudacao').textContent = 'Conta 77120-5'; }
+  else $('login-erro').textContent = 'Senha incorreta';
+}
+function sair() { location.reload(); }
+function alternaMenu() { const l = $('lateral'); l.classList.toggle('aberta'); $('alterna').setAttribute('aria-label', l.classList.contains('aberta') ? 'Recolher menu' : 'Expandir menu'); }
+function subPix() { const s = $('sub-pix'); s.hidden = !s.hidden; $('m-pix').setAttribute('aria-expanded', !s.hidden); }
+function tela(t) {
+  document.querySelectorAll('main > section').forEach(s => s.hidden = s.id !== 't-' + t);
+  if (t === 'cartoes') cartoes();
+  if (t === 'transferir') etapa(1);
+}
+function sugerir(q) {
+  const l = $('sug');
+  if (q.length < 3) { l.hidden = true; return; }
+  const r = CONTATOS.filter(c => c.nome.toLowerCase().includes(q.toLowerCase()));
+  l.innerHTML = r.map(c => `<li role="option" onclick="escolherDest(${c.id})">${c.nome} — CPF ${c.doc}</li>`).join('');
+  l.hidden = !r.length;
+}
+function escolherDest(id) { dest = CONTATOS.find(c => c.id === id); $('dest').value = dest.nome; $('sug').hidden = true; $('dest-ok').textContent = 'Destinatário: ' + dest.nome + ' (CPF ' + dest.doc + ')'; }
+function etapa(n) {
+  if (n === 2 && !dest) return;
+  if (n === 3) {
+    const v = parseFloat($('valor').value.replace(',', '.'));
+    if (!(v > 0)) { $('erro2').textContent = 'Informe o valor'; return; }
+    if (quandoSel === 'agendar' && !dataSel) { $('erro2').textContent = 'Escolha a data'; return; }
+    $('resumo').innerHTML = `<li>Para: ${dest.nome}</li><li>Valor: R$ ${v.toFixed(2)}</li><li>Quando: ${quandoSel === 'agendar' ? dataSel : 'hoje'}</li><li>Descrição: ${$('desc').value || '—'}</li>`;
+  }
+  $('et').textContent = n;
+  [1, 2, 3].forEach(i => $('e' + i).hidden = i !== n);
+  if (n === 2) montarDias();
+}
+function quando() { quandoSel = document.querySelector('input[name=quando]:checked').value; $('agenda').hidden = quandoSel !== 'agendar'; }
+function montarDias() {
+  $('dias').innerHTML = Array.from({ length: 30 }, (_, i) => i + 1).map(d => `<button ${d < 8 ? 'disabled' : ''} aria-label="${d} de novembro" onclick="escolherDia(${d})">${d}</button>`).join('');
+}
+function escolherDia(d) { dataSel = '2026-11-' + String(d).padStart(2, '0'); $('data-sel').textContent = ' ' + d + '/11/2026'; $('cal').hidden = true; }
+function pedirToken() { $('m-token').hidden = false; $('token').value = ''; $('erro-tk').textContent = ''; }
+function confirmarToken() {
+  if ($('token').value !== TOKEN) { $('erro-tk').textContent = 'Token inválido'; return; }
+  estado.transferencias.push({ destinatario: dest.nome, destId: dest.id, valor: parseFloat($('valor').value.replace(',', '.')), quando: quandoSel, data: quandoSel === 'agendar' ? dataSel : 'hoje', descricao: $('desc').value });
+  $('m-token').hidden = true; tela('inicio'); toast('Pix autorizado');
+}
+function cartoes() {
+  $('trilho').innerHTML = CARTOES.map(c => `<div class="cartao"><strong>${c.tipo}</strong><br>Final ${c.final}<br>${c.bloqueado ? 'BLOQUEADO' : 'Ativo'}<br>Limite R$ ${c.limite}</div>`).join('');
+  mover(0);
+}
+function mover(d) {
+  idx = Math.max(0, Math.min(CARTOES.length - 1, idx + d));
+  $('trilho').style.transform = `translateX(-${idx * 330}px)`;
+  const c = CARTOES[idx]; $('cartao-ativo').textContent = `Cartão selecionado: ${c.tipo} final ${c.final}`;
+  $('limite').value = c.limite; $('bloquear').textContent = c.bloqueado ? 'Desbloquear' : 'Bloquear temporariamente';
+}
+function bloquear() { const c = CARTOES[idx]; c.bloqueado = !c.bloqueado; cartoes(); toast(c.bloqueado ? 'Cartão bloqueado' : 'Cartão desbloqueado'); }
+function salvarLimite() { const v = parseInt($('limite').value.replace(/\D/g, ''), 10); if (v >= 0) { CARTOES[idx].limite = v; cartoes(); toast('Limite atualizado'); } }
+</script>
+</body>
+</html>

@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Vagas — Conecta</title>
+<style>
+  body { font-family: sans-serif; margin: 0; background: #f3f2ef; }
+  header { background: #fff; padding: 8px 16px; display: flex; gap: 12px; align-items: center; border-bottom: 1px solid #ccc; }
+  main { padding: 16px; max-width: 760px; margin: auto; }
+  .card { background: #fff; border: 1px solid #ddd; padding: 10px; margin: 8px 0; display: flex; justify-content: space-between; }
+  .card h3 { margin: 0; font-size: 16px; }
+  [hidden] { display: none !important; }
+  .drawer, .painel, .menu-lat { position: fixed; top: 0; bottom: 0; background: #fff; padding: 16px; box-shadow: 0 0 8px #666; overflow: auto; }
+  .drawer { left: 0; width: 280px; }
+  .menu-lat { left: 0; width: 220px; }
+  .painel { right: 0; width: 420px; }
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; }
+  .modal > div { background: #fff; padding: 16px; width: 440px; max-height: 80vh; overflow: auto; }
+  .lista { list-style: none; margin: 0; padding: 0; border: 1px solid #aaa; background: #fff; }
+  .lista li { padding: 4px 8px; cursor: pointer; }
+  .toast { position: fixed; bottom: 16px; right: 16px; background: #222; color: #fff; padding: 10px 14px; }
+  .cookies { position: fixed; bottom: 0; left: 0; right: 0; background: #fff; padding: 10px; border-top: 2px solid #0a66c2; z-index: 5; }
+  label { display: block; margin: 8px 0 2px; }
+</style>
+</head>
+<body>
+<header>
+  <button id="burger" aria-label="Abrir menu" onclick="abrirMenu(true)">☰</button>
+  <strong>Conecta Vagas</strong>
+  <input id="busca" placeholder="Buscar cargo ou empresa" aria-label="Buscar cargo ou empresa" oninput="busca=this.value; pagina=1; render()">
+  <button id="btn-filtros" onclick="abrirFiltros(true)">Filtros</button>
+  <span id="contador">Candidaturas: 0</span>
+</header>
+
+<nav class="menu-lat" id="menu" hidden aria-label="Menu principal">
+  <button onclick="abrirMenu(false)" aria-label="Fechar menu">✕</button>
+  <p><a href="#" onclick="irTela('vagas'); return false;">Vagas</a></p>
+  <p><a href="#" onclick="irTela('minhas'); return false;">Minhas vagas</a></p>
+  <p><a href="#" onclick="return false;">Mensagens</a></p>
+  <p><a href="#" onclick="return false;">Rede</a></p>
+</nav>
+
+<aside class="drawer" id="filtros" hidden aria-label="Filtros">
+  <h2>Filtros</h2>
+  <label for="f-cidade">Cidade</label>
+  <input id="f-cidade" placeholder="Qualquer cidade">
+  <label id="l-mod">Modalidade</label>
+  <button id="f-mod" aria-haspopup="listbox" aria-labelledby="l-mod f-mod" onclick="toggleLista('lst-mod')">Qualquer</button>
+  <ul class="lista" id="lst-mod" role="listbox" hidden>
+    <li role="option" onclick="escolher('f-mod','lst-mod','Qualquer')">Qualquer</li>
+    <li role="option" onclick="escolher('f-mod','lst-mod','Remoto')">Remoto</li>
+    <li role="option" onclick="escolher('f-mod','lst-mod','Híbrido')">Híbrido</li>
+    <li role="option" onclick="escolher('f-mod','lst-mod','Presencial')">Presencial</li>
+  </ul>
+  <fieldset><legend>Nível</legend>
+    <label><input type="radio" name="nivel" value="" checked> Qualquer</label>
+    <label><input type="radio" name="nivel" value="Júnior"> Júnior</label>
+    <label><input type="radio" name="nivel" value="Pleno"> Pleno</label>
+    <label><input type="radio" name="nivel" value="Sênior"> Sênior</label>
+  </fieldset>
+  <button onclick="aplicarFiltros()">Aplicar filtros</button>
+  <button onclick="limparFiltros()">Limpar</button>
+</aside>
+
+<main>
+  <section id="tela-vagas">
+    <h1>Vagas para você</h1>
+    <div id="resumo"></div>
+    <div id="lista"></div>
+    <button id="mais" onclick="pagina++; render()">Carregar mais vagas</button>
+  </section>
+
+  <section id="tela-minhas" hidden>
+    <h1>Minhas vagas</h1>
+    <div role="tablist">
+      <button role="tab" id="tab-salvas" aria-selected="true" onclick="aba('salvas')">Salvas</button>
+      <button role="tab" id="tab-candidaturas" aria-selected="false" onclick="aba('candidaturas')">Candidaturas</button>
+      <button role="tab" id="tab-alertas" aria-selected="false" onclick="aba('alertas')">Alertas</button>
+    </div>
+    <div id="p-salvas"></div>
+    <div id="p-candidaturas" hidden></div>
+    <div id="p-alertas" hidden>
+      <h2>Alertas de vagas</h2>
+      <label><input type="checkbox" id="al-sem" role="switch" onchange="salvarAlerta()"> Vagas semelhantes às salvas</label>
+      <label for="al-freq">Frequência</label>
+      <select id="al-freq" onchange="salvarAlerta()">
+        <option value="diario">Diário</option>
+        <option value="semanal">Semanal</option>
+        <option value="mensal">Mensal</option>
+      </select>
+      <label><input type="checkbox" id="al-email" role="switch" onchange="salvarAlerta()"> Receber por e-mail</label>
+    </div>
+  </section>
+</main>
+
+<aside class="painel" id="detalhe" hidden aria-label="Detalhe da vaga"></aside>
+
+<div class="modal" id="modal" hidden role="dialog" aria-modal="true" aria-label="Candidatura simples">
+  <div id="modal-corpo"></div>
+</div>
+<div class="modal" id="confirma" hidden role="alertdialog" aria-label="Confirmação">
+  <div>
+    <p>Descartar candidatura em andamento?</p>
+    <button onclick="descartar(true)">Descartar</button>
+    <button onclick="descartar(false)">Continuar candidatura</button>
+  </div>
+</div>
+<div class="toast" id="toast" hidden role="status"></div>
+<div class="cookies" id="cookies">Usamos cookies para melhorar sua experiência.
+  <button onclick="document.getElementById('cookies').remove()">Aceitar</button>
+  <button onclick="document.getElementById('cookies').remove()">Recusar</button>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const CIDADES = ['São Paulo', 'Recife', 'Rio de Janeiro', 'Curitiba', 'Belo Horizonte', 'Porto Alegre'];
+const MODS = ['Remoto', 'Híbrido', 'Presencial'];
+const NIVEIS = ['Júnior', 'Pleno', 'Sênior'];
+const CARGOS = ['Analista de Dados', 'Engenheiro de Dados', 'Desenvolvedor Backend', 'Product Manager', 'Designer de Produto', 'Analista de BI', 'Cientista de Dados', 'DevOps'];
+const EMPRESAS = ['Nuvem Azul', 'Banco Delta', 'Rio Tech', 'Orbita', 'Loja Maior', 'Fintech Alfa', 'Saúde Mais', 'Grão Digital'];
+const VAGAS = [];
+for (let i = 0; i < 48; i++) {
+  VAGAS.push({ id: i + 1, titulo: CARGOS[i % 8], empresa: EMPRESAS[(i * 3 + 1) % 8], cidade: CIDADES[(i * 5) % 6], mod: MODS[i % 3], nivel: NIVEIS[(i * 7) % 3] });
+}
+// alvos e iscas
+VAGAS[30] = { id: 31, titulo: 'Analista de Dados', empresa: 'Nuvem Azul', cidade: 'Recife', mod: 'Remoto', nivel: 'Pleno' };
+VAGAS[10] = { id: 11, titulo: 'Analista de Dados', empresa: 'Nuvem Azul', cidade: 'Recife', mod: 'Presencial', nivel: 'Pleno' };
+VAGAS[21] = { id: 22, titulo: 'Analista de Dados', empresa: 'Banco Delta', cidade: 'Recife', mod: 'Remoto', nivel: 'Pleno' };
+VAGAS[36] = { id: 37, titulo: 'Engenheiro de Dados', empresa: 'Rio Tech', cidade: 'Rio de Janeiro', mod: 'Híbrido', nivel: 'Sênior' };
+VAGAS[14] = { id: 15, titulo: 'Engenheiro de Dados', empresa: 'Rio Tech', cidade: 'São Paulo', mod: 'Remoto', nivel: 'Pleno' };
+
+const estado = window.__estado = { candidaturas: [], salvas: [], alertas: { semelhantes: false, frequencia: 'diario', email: false }, seguindo: [] };
+let busca = '', filtros = { cidade: '', mod: 'Qualquer', nivel: '' }, pagina = 1, aberta = null, passo = 1, cand = null;
+const POR_PAGINA = 8;
+
+function filtradas() {
+  return VAGAS.filter(v =>
+    (!busca || (v.titulo + ' ' + v.empresa).toLowerCase().includes(busca.toLowerCase())) &&
+    (!filtros.cidade || v.cidade.toLowerCase().includes(filtros.cidade.toLowerCase())) &&
+    (filtros.mod === 'Qualquer' || v.mod === filtros.mod) &&
+    (!filtros.nivel || v.nivel === filtros.nivel));
+}
+function render() {
+  const f = filtradas(), vis = f.slice(0, pagina * POR_PAGINA);
+  $('resumo').textContent = f.length + ' vagas encontradas';
+  $('lista').innerHTML = vis.map(v => `<div class="card"><div><h3>${v.titulo}</h3><div>${v.empresa} · ${v.cidade} · ${v.mod} · ${v.nivel}</div></div>
+    <div><button onclick="abrirVaga(${v.id})" aria-label="Ver vaga ${v.titulo} ${v.empresa} ${v.cidade} ${v.mod}">Ver vaga</button>
+    <button onclick="salvar(${v.id})" aria-label="Salvar vaga ${v.titulo} ${v.empresa} ${v.cidade}">${estado.salvas.includes(v.id) ? '★ Salva' : '☆ Salvar'}</button></div></div>`).join('');
+  $('mais').hidden = vis.length >= f.length;
+  $('contador').textContent = 'Candidaturas: ' + estado.candidaturas.length;
+}
+function toast(t) { const e = $('toast'); e.textContent = t; e.hidden = false; setTimeout(() => e.hidden = true, 2500); }
+function abrirMenu(b) { $('menu').hidden = !b; }
+function abrirFiltros(b) { $('filtros').hidden = !b; }
+function toggleLista(id) { $(id).hidden = !$(id).hidden; }
+function escolher(btn, lista, v) { $(btn).textContent = v; $(lista).hidden = true; }
+function aplicarFiltros() {
+  filtros = { cidade: $('f-cidade').value, mod: $('f-mod').textContent, nivel: (document.querySelector('input[name=nivel]:checked') || {}).value || '' };
+  pagina = 1; abrirFiltros(false); render();
+}
+function limparFiltros() { $('f-cidade').value = ''; $('f-mod').textContent = 'Qualquer'; document.querySelector('input[name=nivel][value=""]').checked = true; }
+function irTela(t) { abrirMenu(false); $('tela-vagas').hidden = t !== 'vagas'; $('tela-minhas').hidden = t !== 'minhas'; if (t === 'minhas') aba('salvas'); }
+function aba(a) {
+  for (const x of ['salvas', 'candidaturas', 'alertas']) { $('p-' + x).hidden = x !== a; $('tab-' + x).setAttribute('aria-selected', x === a); }
+  $('p-salvas').innerHTML = estado.salvas.length ? estado.salvas.map(id => { const v = VAGAS.find(x => x.id === id); return `<div class="card">${v.titulo} — ${v.empresa}</div>`; }).join('') : '<p>Nenhuma vaga salva.</p>';
+  $('p-candidaturas').innerHTML = estado.candidaturas.map(c => `<div class="card">${c.titulo} — ${c.empresa}</div>`).join('') || '<p>Nenhuma candidatura.</p>';
+}
+function salvar(id) { const i = estado.salvas.indexOf(id); if (i < 0) { estado.salvas.push(id); toast('Vaga salva'); } else estado.salvas.splice(i, 1); render(); }
+function salvarAlerta() { estado.alertas = { semelhantes: $('al-sem').checked, frequencia: $('al-freq').value, email: $('al-email').checked }; toast('Alerta atualizado'); }
+
+function abrirVaga(id) {
+  aberta = VAGAS.find(v => v.id === id);
+  const d = $('detalhe'); d.hidden = false;
+  d.innerHTML = `<button onclick="$('detalhe').hidden=true" aria-label="Fechar detalhe">✕</button>
+    <h2>${aberta.titulo}</h2><p>${aberta.empresa} · ${aberta.cidade} · ${aberta.mod} · ${aberta.nivel}</p>
+    <p>Responsabilidades: análise de dados, dashboards e relatórios para as áreas de negócio.</p>
+    <button onclick="iniciarCand()">Candidatura simples</button>
+    <button onclick="salvar(${aberta.id}); abrirVaga(${aberta.id})">${estado.salvas.includes(aberta.id) ? '★ Salva' : '☆ Salvar vaga'}</button>`;
+}
+function iniciarCand() {
+  passo = 1; cand = { telefone: '', email: 'pessoal@exemplo.com', cv: '', sql: '', pretensao: '', imediato: '', seguir: true };
+  $('modal').hidden = false; passoRender();
+}
+class Perguntas extends HTMLElement {
+  connectedCallback() {
+    const r = this.attachShadow({ mode: 'open' });
+    r.innerHTML = `<label>Anos de experiência com SQL <input id="sql" type="number" value="${cand.sql}"></label>
+      <label>Pretensão salarial (R$) <input id="pret" value="${cand.pretensao}"></label>
+      <fieldset><legend>Disponível para início imediato?</legend>
+        <label><input type="radio" name="im" value="sim" ${cand.imediato === 'sim' ? 'checked' : ''}> Sim</label>
+        <label><input type="radio" name="im" value="nao" ${cand.imediato === 'nao' ? 'checked' : ''}> Não</label></fieldset>`;
+    r.getElementById('sql').oninput = e => cand.sql = e.target.value;
+    r.getElementById('pret').oninput = e => cand.pretensao = e.target.value;
+    r.querySelectorAll('input[name=im]').forEach(i => i.onchange = e => cand.imediato = e.target.value);
+  }
+}
+customElements.define('perguntas-triagem', Perguntas);
+
+function passoRender() {
+  const c = $('modal-corpo'), titulo = `<h2>Candidatura — ${aberta.titulo} (${aberta.empresa})</h2><p>Passo ${passo} de 4</p>`;
+  const fechar = `<button onclick="$('confirma').hidden=false" aria-label="Fechar candidatura">✕</button>`;
+  if (passo === 1) c.innerHTML = fechar + titulo + `<label for="tel">Telefone</label><input id="tel" value="${cand.telefone}" oninput="cand.telefone=this.value">
+    <label for="mail">E-mail de contato</label><select id="mail" onchange="cand.email=this.value">
+      <option value="pessoal@exemplo.com" ${cand.email.startsWith('pessoal') ? 'selected' : ''}>pessoal@exemplo.com</option>
+      <option value="trabalho@exemplo.com" ${cand.email.startsWith('trabalho') ? 'selected' : ''}>trabalho@exemplo.com</option></select>
+    <p><button onclick="avancar()">Avançar</button></p><p id="erro" role="alert"></p>`;
+  if (passo === 2) c.innerHTML = fechar + titulo + `<fieldset><legend>Currículo</legend>
+    ${['cv-2026.pdf', 'cv-antigo.pdf', 'Enviar novo arquivo'].map(n => `<label><input type="radio" name="cv" value="${n}" ${cand.cv === n ? 'checked' : ''} onchange="cand.cv=this.value"> ${n}</label>`).join('')}</fieldset>
+    <p><button onclick="passo--; passoRender()">Voltar</button> <button onclick="avancar()">Avançar</button></p><p id="erro" role="alert"></p>`;
+  if (passo === 3) { c.innerHTML = fechar + titulo + '<perguntas-triagem></perguntas-triagem><p><button onclick="passo--; passoRender()">Voltar</button> <button onclick="avancar()">Avançar</button></p><p id="erro" role="alert"></p>'; }
+  if (passo === 4) c.innerHTML = fechar + titulo + `<h3>Revisar</h3><ul><li>Telefone: ${cand.telefone}</li><li>E-mail: ${cand.email}</li><li>Currículo: ${cand.cv}</li>
+    <li>SQL: ${cand.sql} anos</li><li>Pretensão: R$ ${cand.pretensao}</li><li>Início imediato: ${cand.imediato}</li></ul>
+    <label><input type="checkbox" id="seguir" ${cand.seguir ? 'checked' : ''} onchange="cand.seguir=this.checked"> Seguir ${aberta.empresa}</label>
+    <p><button onclick="passo--; passoRender()">Voltar</button> <button onclick="enviarCand()">Enviar candidatura</button></p>`;
+}
+function avancar() {
+  const e = $('erro');
+  if (passo === 1 && !/\d{2}\s?9?\d{4}-?\d{4}/.test(cand.telefone)) return e.textContent = 'Informe um telefone válido';
+  if (passo === 2 && !cand.cv) return e.textContent = 'Escolha um currículo';
+  if (passo === 3 && (cand.sql === '' || !cand.pretensao || !cand.imediato)) return e.textContent = 'Responda todas as perguntas';
+  passo++; passoRender();
+}
+function descartar(sim) { $('confirma').hidden = true; if (sim) $('modal').hidden = true; }
+function enviarCand() {
+  estado.candidaturas.push({ vaga: aberta.id, titulo: aberta.titulo, empresa: aberta.empresa, ...cand });
+  if (cand.seguir) estado.seguindo.push(aberta.empresa);
+  $('modal').hidden = true; $('detalhe').hidden = true; toast('Candidatura enviada'); render();
+}
+render();
+</script>
+</body>
+</html>
