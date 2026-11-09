@@ -795,7 +795,9 @@
     return { mudou, senha: refPara(novo), prox };
   }
 
-  function melhor(texto, candidatos) {
+  // Melhor candidato para `texto`: igual > começa com > contém. Empate sem igualdade exata é
+  // ambíguo: devolve -1 e põe os índices empatados em `ambiguas`, em vez de escolher o primeiro.
+  function melhor(texto, candidatos, ambiguas) {
     const k = chave(texto);
     const pont = (t) => {
       const c = chave(t);
@@ -805,12 +807,15 @@
       if (c.includes(k)) return 1;
       return 0;
     };
-    let melhorI = -1, melhorP = 0;
-    candidatos.forEach((t, i) => {
-      const p = pont(t);
-      if (p > melhorP) { melhorP = p; melhorI = i; }
-    });
-    return melhorI;
+    const ps = candidatos.map(pont);
+    const topo = Math.max(0, ...ps);
+    if (!topo) return -1;
+    const idx = ps.flatMap((p, i) => (p === topo ? [i] : []));
+    if (idx.length > 1 && topo < 3 && new Set(idx.map((i) => chave(candidatos[i]))).size > 1) {
+      if (ambiguas) ambiguas.push(...idx);
+      return -1;
+    }
+    return idx[0];
   }
 
   // Escolhe uma opção de <select> nativo por texto ou value.
@@ -818,8 +823,9 @@
     const el = campoDe(exigir(a.ref));
     const ops = [...el.options];
     let i = ops.findIndex((o) => o.value === a.opcao);
-    if (i < 0) i = melhor(a.opcao, ops.map((o) => o.text));
-    if (i < 0) return { erro: true, opcoes: ops.slice(0, 40).map((o) => norm(o.text)) };
+    const amb = [];
+    if (i < 0) i = melhor(a.opcao, ops.map((o) => o.text), amb);
+    if (i < 0) return { erro: true, ambiguas: amb.map((j) => norm(ops[j].text)), opcoes: ops.slice(0, 40).map((o) => norm(o.text)) };
     const w = janela(el);
     Object.getOwnPropertyDescriptor(w.HTMLSelectElement.prototype, 'selectedIndex').set.call(el, i);
     el.dispatchEvent(new w.Event('input', { bubbles: true, composed: true }));
@@ -852,13 +858,15 @@
       const t = norm(el.innerText) || norm(el.getAttribute('aria-label'));
       if (t) lista.push({ el, t });
     }
-    const i = melhor(a.texto, lista.map((x) => x.t));
+    const amb = [];
+    const i = melhor(a.texto, lista.map((x) => x.t), amb);
     // Campo de busca da própria lista (focado ao abrir): filtra lista virtualizada.
     const f = focoProfundo();
     const busca = !!f && f !== (a.ref ? achar(a.ref) : null)
       && ((f.localName === 'input' && /^(text|search)$/.test(f.type)) || f.getAttribute('role') === 'searchbox');
     return {
       escolhida: i >= 0 ? { r: refPara(lista[i].el), t: lista[i].t } : null,
+      ambiguas: amb.map((j) => ({ r: refPara(lista[j].el), t: corta(lista[j].t, 60) })),
       textos: lista.slice(0, 20).map((x) => corta(x.t, 60)),
       busca,
       prox,

@@ -75,6 +75,19 @@ async fn mapa_e_acoes() {
     tem(&nd.ok(&["check", "Aceito os termos"]), "já estava marcado");
     tem(&nd.ok(&["check", "Aceito os termos", "--nao"]), "[desmarcado]");
     nd.ok(&["check", "Aceito os termos"]);
+    // Texto que bate em mais de uma opção não escolhe a primeira: falha e lista as opções.
+    let r = nd.run(&["pick", "Estado", "a"]);
+    assert!(!r.status.success());
+    let err = String::from_utf8_lossy(&r.stderr);
+    tem(&err, "bate com mais de uma");
+    tem(&err, "São Paulo | Rio de Janeiro | Minas Gerais");
+    // Em lista customizada a lista segue aberta e o erro traz as refs das opções empatadas.
+    let r = nd.run(&["pick", "Cidade", "são"]);
+    assert!(!r.status.success());
+    let err = String::from_utf8_lossy(&r.stderr);
+    tem(&err, "bate com mais de uma; a lista segue aberta");
+    tem(&err, "option \"São Paulo\" | ");
+    tem(&err, "option \"São José dos Campos\"");
     tem(&nd.ok(&["pick", "Cidade", "Santos"]), "escolhido \"Santos\"");
     tem(&nd.ok(&["pick", "Escolha a cor", "verde"]), "escolhido \"Verde\"");
     // Lista virtualizada: "Brasil" só é desenhada depois de digitar na busca dela.

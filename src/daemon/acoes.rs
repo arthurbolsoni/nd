@@ -420,6 +420,16 @@ async fn escolher(d: &Arc<Daemon>, tab: &Tab, alvo: &Alvo, opcao: &str) -> Resul
     if tipo == "select" {
         let v = js(d, &alvo.q, "escolher", json!({ "ref": alvo.r, "opcao": opcao })).await?;
         if v["erro"] == json!(true) {
+            let amb: Vec<&str> = v["ambiguas"]
+                .as_array()
+                .map(|a| a.iter().filter_map(Value::as_str).collect())
+                .unwrap_or_default();
+            if !amb.is_empty() {
+                return Err(format!(
+                    "a opção \"{opcao}\" bate com mais de uma: {}; use o texto completo",
+                    amb.join(" | ")
+                ));
+            }
             let ops: Vec<&str> = v["opcoes"]
                 .as_array()
                 .map(|a| a.iter().filter_map(Value::as_str).collect())
@@ -439,6 +449,7 @@ async fn escolher(d: &Arc<Daemon>, tab: &Tab, alvo: &Alvo, opcao: &str) -> Resul
     }
     let fim = Instant::now() + ESPERA_OPCOES;
     let mut visiveis: Vec<String>;
+    let mut ambiguas: Vec<String> = Vec::new();
     let mut buscou = tipo == "texto" || tipo == "editor";
     loop {
         let v = js_ref(
@@ -473,12 +484,34 @@ async fn escolher(d: &Arc<Daemon>, tab: &Tab, alvo: &Alvo, opcao: &str) -> Resul
             .as_array()
             .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())
             .unwrap_or_default();
+        // Empate entre opções: com a mesma lista em duas leituras seguidas, para na hora e deixa a
+        // lista aberta; o agente clica numa das refs listadas.
+        let amb: Vec<String> = v["ambiguas"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|x| format!("{} option \"{}\"", x["r"].as_str().unwrap_or(""), x["t"].as_str().unwrap_or("")))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if !amb.is_empty() && amb == ambiguas {
+            return Err(format!(
+                "a opção \"{opcao}\" bate com mais de uma; a lista segue aberta, clique numa: {}",
+                amb.join(" | ")
+            ));
+        }
+        ambiguas = amb;
         if Instant::now() >= fim {
             break;
         }
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
-    if visiveis.is_empty() {
+    if !ambiguas.is_empty() {
+        Err(format!(
+            "a opção \"{opcao}\" bate com mais de uma; a lista segue aberta, clique numa: {}",
+            ambiguas.join(" | ")
+        ))
+    } else if visiveis.is_empty() {
         Err(format!(
             "nenhuma lista de opções apareceu depois de {} s",
             ESPERA_OPCOES.as_secs()
